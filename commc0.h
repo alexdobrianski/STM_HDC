@@ -523,6 +523,10 @@ char PORTE    @ 0xF84;
  #ifdef __PIC24HJ64GP502__
  #include "p24HJ64GP502.h"
   #endif
+#ifdef __PIC24HJ64GP504__
+ #include "p24HJ64GP504.h"
+  #endif
+
 #include "rtcc.h"
 
 #include "pps.h"
@@ -1130,6 +1134,132 @@ unsigned char *ptr_FSR;
    _FUID3('O');
    
 #endif
+
+#ifdef __PIC24HJ64GP504__
+   // configuration
+   _FBS( RBS_NO_RAM & BSS_NO_BOOT_CODE & BWRP_WRPROTECT_OFF);
+   // Boot Segment RAM Code Protection Size
+   //   11        = No Boot RAM defined
+   //   10        = Boot RAM is 128 bytes
+   //   01        = Boot RAM is 256 bytes
+   //   00        = Boot RAM is 1024 bytes
+   // Boot Segment Program Flash Code Protection Size
+   //       X11   = No Boot program Flash segment 
+   //            Boot space is 1K Instruction Words (except interrupt vectors)
+   //       110   = Standard security; boot program Flash segment ends at 0x0007FE
+   //       010   = High security; boot program Flash segment ends at 0x0007FE 
+   //            Boot space is 4K Instruction Words (except interrupt vectors)
+   //       101   = Standard security; boot program Flash segment, ends at 0x001FFE
+   //       001   = High security; boot program Flash segment ends at 0x001FFE
+   //            Boot space is 8K Instruction Words (except interrupt vectors)
+   //       100   = Standard security; boot program Flash segment ends at 0x003FFE
+   //       000   = High security; boot program Flash segment ends at 0x003FFE
+   // Boot Segment Program Flash Write Protection 
+   //          1  = Boot segment can be written 
+   //          0  = Boot segment is write-protected
+   _FSS(RSS_NO_RAM & SSS_NO_FLASH & SWRP_WRPROTECT_OFF); 
+   // Secure Segment RAM Code Protection
+   //   11        = No Secure RAM defined
+   //   10        = Secure RAM is 256 Bytes less BS RAM
+   //   01        = Secure RAM is 2048 Bytes less BS RAM
+   //   00        = Secure RAM is 4096 Bytes less BS RAM
+   // Secure Segment Program Flash Code Protection Size (Secure segment is not implemented on 32K devices)
+   //       X11   = No Secure program flash segment 
+   //            Secure space is 4K IW less BS
+   //       110   = Standard security; secure program flash segment startsat End of BS, ends at 0x001FFE
+   //       010   = High security; secure program flash segment starts at End of BS, ends at 0x001FFE
+   //            Secure space is 8K IW less BS
+   //       101   = Standard security; secure program flash segment starts at End of BS, ends at 0x003FFE
+   //       001   = High security; secure program flash segment starts at End of BS, ends at 0x003FFE
+   //            Secure space is 16K IW less BS
+   //       100   = Standard security; secure program flash segment starts at End of BS, ends at 007FFEh
+   //       000   = High security; secure program flash segment starts at End of BS, ends at 0x007FFE
+   // Secure Segment Program Flash Write-Protect bit
+   //          1  = Secure Segment can bet written
+   //          0  = Secure Segment is write-protected
+   _FGS(GSS_OFF & GCP_OFF & GWRP_OFF);
+   // General Segment Code-Protect bit
+   //        11   = User program memory is not code-protected
+   //        10   = Standard security
+   //        0x   = High security
+   // General Segment Write-Protect bit
+   //          1  = User program memory is not write-protected
+   //          0  = User program memory is write-protected
+   _FOSCSEL(FNOSC_FRCPLL);
+// & IESO_ON);
+   // Two-speed Oscillator Start-up Enable bit
+   //   1         = Start-up device with FRC, then automatically switch to the user-selected oscillator source when ready
+   //   0         = Start-up device with user-selected oscillator source			
+   // Initial Oscillator Source Selection bits
+   //        111  = Internal Fast RC (FRC) oscillator with postscaler
+   //        110  = Internal Fast RC (FRC) oscillator with divide-by-16
+   //        101  = LPRC oscillator
+   //        100  = Secondary (LP) oscillator
+   //        011  = Primary (XT, HS, EC) oscillator with PLL
+   //        010  = Primary (XT, HS, EC) oscillator
+   //        001  = Internal Fast RC (FRC) oscillator with PLL
+   //        000  = FRC oscillator
+   _FOSC(FCKSM_CSECME & IOL1WAY_OFF & OSCIOFNC_ON & POSCMD_NONE);
+   // Clock Switching Mode bits
+   //   1x        = Clock switching is disabled, Fail-Safe Clock Monitor is disabled
+   //   01        = Clock switching is enabled, Fail-Safe Clock Monitor is disabled
+   //   00        = Clock switching is enabled, Fail-Safe Clock Monitor is enabled
+   // Peripheral pin select configuration
+   //     1       = Allow only one reconfiguration
+   //     0       = Allow multiple reconfigurations
+   // OSC2 Pin Function bit (except in XT and HS modes)
+   //        1    = OSC2 is clock output
+   //        0    = OSC2 is general purpose digital I/O pin
+   // Primary Oscillator Mode Select bits
+   //         11  = Primary oscillator disabled
+   //         10  = HS Crystal Oscillator mode
+   //         01  = XT Crystal Oscillator mode
+   //         00  = EC (External Clock) mode
+   _FWDT(FWDTEN_OFF);
+   // Watchdog Timer Enable bit
+   //   1         = Watchdog Timer always enabled (LPRC oscillator cannot be disabled. Clearing the SWDTEN bit in the RCON register has no effect.)
+   //   0         = Watchdog Timer enabled/disabled by user software (LPRC can be disabled by clearing the SWDTEN bit in the RCON register)
+   // Watchdog Timer Window Enable bit
+   //    1        = Watchdog Timer in Non-Window mode
+   //    0        = Watchdog Timer in Window mode
+   // Watchdog Timer Prescaler bit
+   //      1       = 1:128
+   //      0       = 1:32
+   // Watchdog Timer Postscaler bits
+   //       1111   = 1:32,768
+   //       1110   = 1:16,384
+   //       0001   = 1:2
+   //       0000   = 1:1
+   _FPOR(ALTI2C_OFF & FPWRT_PWR1);
+   // Alternate I2C™ pins
+   //      1       = I2C mapped to SDA1/SCL1 pins
+   //      0       = I2C mapped to ASDA1/ASCL1 pins
+   // Power-on Reset Timer Value Select bits
+   //       111    = PWRT = 128 ms
+   //       110    = PWRT = 64 ms
+   //       101    = PWRT = 32 ms
+   //       100    = PWRT = 16 ms
+   //       011    = PWRT = 8 ms
+   //       010    = PWRT = 4 ms
+   //       001    = PWRT = 2 ms
+   //       000    = PWRT = Disabled
+   _FICD(ICS_PGD1 & JTAGEN_OFF)
+   // JTAG Enable bit
+   //     1        = JTAG enabled
+   //     0        = JTAG disabled
+   // ICD Communication Channel Select bits
+   //         11   = Communicate on PGEC1 and PGED1
+   //         10   = Communicate on PGEC2 and PGED2
+   //         01   = Communicate on PGEC3 and PGED3
+   //         00   = Reserved, do not use
+
+   _FUID0('M');
+   _FUID1('A');
+   _FUID2('I');
+   _FUID3('N');
+   
+#endif
+
 
 
 #define Clock_8MHz

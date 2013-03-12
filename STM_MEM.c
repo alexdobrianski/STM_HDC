@@ -25,6 +25,19 @@ see www.adobri.com for communication protocol spec
 // [1 GYRO]->[2 MEM]-> [3 POW] -> [4 STM] -> [5 BT] -| 
 //  A                                                |
 //  --------------------------------------------------
+////////////////////////////////////////////
+// listing in C30
+// -Wa,-ahlsnd="$(BINDIR_)$(INFILEBASE).lst"
+// -g - debugging information
+// -O1 - optimization looks good
+// -02 and -O3 does something that code is not recognizable - can be dangerouse
+// -fpack-struct pack struct
+// -save-temps 
+// -funroll-loops this will make loops big, ugly but fast
+////////////////////////////////////////////
+// -g -Wall -save-temps -O1 -Wa,-ahlsnd="$(BINDIR_)$(INFILEBASE).lst"
+////////////////////////////////////////////
+
 #define MY_UNIT '5' 
 #define MAX_COM_TOPOLOGY_UNIT '5'
 
@@ -90,28 +103,55 @@ see www.adobri.com for communication protocol spec
 #endif
 
 
+#ifdef __PIC24H__
+// SSCLOCK RA0(pin2), SSDATA_IN RA1(pin3), SSDATA_OUT RA2(pin9), SSCS RA3(pin10)
+//#define SSPORT  LATAbits
+//#define SSCLOCK LATA0
+//#define SSDATA_IN LATA1
+//#define SSDATA_OUT LATA2
+//#define SSCS       LATA3
+
+#define SSPORT  PORTAbits
+#define SSCLOCK RA0
+#define SSDATA_IN RA1
+#define SSDATA_OUT RA2
+#define SSCS       RA3
+#else
+// SSCLOCK RA7(pin9), SSDATA_IN RA6(pin10), SSDATA_OUT RA4(pin6), SSCS RA3(pin5)
+#define SSPORT PORTA
+#define SSCLOCK 7
+#define SSDATA_IN 6
+#define SSDATA_OUT 4
+#define SSCS       3
+#endif
+
+
+
 #include "commc0.h"
 
 
 //
 // additional code:
-bit MSG_12;
-bit Memory_OK;
-bit MEMinCMDmode;
-bit GetJpegFile;
-bit GetJpegF_b1;
-bit GetJpegF_b2;
-bit GetJpegF_b3;
-bit RMSend;
-bit NEWSend;
-bit APPENDsend;
-bit SIZESend;
-bit READSend;
-bit READFindStart;
-bit READEndOfFile;
-bit ExSend;
-bit SIZEBegin;
-bit SIZEEnd;
+struct _FLAG_CTRL{
+
+unsigned MSG_12:1;
+unsigned Memory_OK:1;
+unsigned MEMinCMDmode:1;
+unsigned GetJpegFile:1;
+unsigned GetJpegF_b1:1;
+unsigned GetJpegF_b2:1;
+unsigned GetJpegF_b3:1;
+unsigned RMSend:1;
+unsigned NEWSend:1;
+unsigned APPENDsend:1;
+unsigned SIZESend:1;
+unsigned READSend:1;
+unsigned READFindStart:1;
+unsigned READEndOfFile:1;
+unsigned ExSend:1;
+unsigned SIZEBegin:1;
+unsigned SIZEEnd:1;
+}_Flags_Ctrl;
 
 #pragma rambank 2
 unsigned char JpegLenH2;
@@ -167,20 +207,21 @@ void main()
         //UnitADR = '4';
 #include "commc6.h"
 
-        MSG_12 = 0;
-        Memory_OK = 0;
-        MEMinCMDmode = 0;
+        _Flags_Ctrl.MSG_12 = 0;
+        _Flags_Ctrl.Memory_OK = 0;
+        _Flags_Ctrl.MEMinCMDmode = 0;
         SetFN = 0;
-        RMSend = 0;
-        NEWSend = 0;
-        APPENDsend = 0;
-        SIZESend = 0;
-        READSend = 0;
-        READFindStart = 0;
-        READEndOfFile = 0;
-        SIZEBegin = 0;
-        SIZEEnd = 0;
+        _Flags_Ctrl.RMSend = 0;
+        _Flags_Ctrl.NEWSend = 0;
+        _Flags_Ctrl.APPENDsend = 0;
+        _Flags_Ctrl.SIZESend = 0;
+        _Flags_Ctrl.READSend = 0;
+        _Flags_Ctrl.READFindStart = 0;
+        _Flags_Ctrl.READEndOfFile = 0;
+        _Flags_Ctrl.SIZEBegin = 0;
+        _Flags_Ctrl.SIZEEnd = 0;
     }
+#ifndef __PIC24H__
     PEIE = 1;    // bit 6 PEIE: Peripheral Interrupt Enable bit
                  // 1 = Enables all unmasked peripheral interrupts
                  // 0 = Disables all peripheral interrupts
@@ -188,6 +229,7 @@ void main()
                  // 1 = Enables all unmasked interrupts
                  // 0 = Disables all interrupts
     RBIF = 0;
+#endif
     ShowMessage();
     bitset(PORTA,3);
     //bitset(SSPCON,4);  // set clock high;
@@ -214,7 +256,7 @@ void ProcessCMD(unsigned char bByte)
     if (!Main.getCMD) // CMD not receved et.
     {
         // this is massages from COM connected to openLog 
-        if (ExSend)
+        if (_Flags_Ctrl.ExSend)
         {
             if (bByte == 0x0a)
             {
@@ -222,17 +264,17 @@ void ProcessCMD(unsigned char bByte)
             }
             goto SKIP_BYTE;
         }
-        if (SIZESend)
+        if (_Flags_Ctrl.SIZESend)
         {
-            if (SIZEEnd)
+            if (_Flags_Ctrl.SIZEEnd)
             {
             }
-            else if (SIZEBegin)
+            else if (_Flags_Ctrl.SIZEBegin)
             {
                 if (bByte == 0x0a)
                 {
-                    SIZEBegin = 0;
-                    SIZEEnd = 1;
+                    _Flags_Ctrl.SIZEBegin = 0;
+                    _Flags_Ctrl.SIZEEnd = 1;
                 }
                 else
                 {
@@ -248,7 +290,7 @@ void ProcessCMD(unsigned char bByte)
             {
                 if (bByte == 0xa)
                 {
-                    SIZEBegin = 1;
+                    _Flags_Ctrl.SIZEBegin = 1;
                     FileLen = 0;
                 }
             }
@@ -256,57 +298,57 @@ void ProcessCMD(unsigned char bByte)
         }
         if (bByte == '>') // openlog in command mode
         {
-            MEMinCMDmode = 1;
-            if (RMSend) // chain rm FN; new FM; append FM; 
+            _Flags_Ctrl.MEMinCMDmode = 1;
+            if (_Flags_Ctrl.RMSend) // chain rm FN; new FM; append FM; 
             {
                 Puts("new ");
                 Puts(FileName);
                 putch(0x0a);
-                RMSend = 0;
-                NEWSend = 1;
+                _Flags_Ctrl.RMSend = 0;
+                _Flags_Ctrl.NEWSend = 1;
             }
-            else if (NEWSend)
+            else if (_Flags_Ctrl.NEWSend)
             {
                 Puts("append ");
                 Puts(FileName);
                 //putch(0x0a);
-                NEWSend = 0;
-                APPENDsend = 1;
+                _Flags_Ctrl.NEWSend = 0;
+                _Flags_Ctrl.APPENDsend = 1;
             }
-            else if (APPENDsend)
+            else if (_Flags_Ctrl.APPENDsend)
             {
-                APPENDsend = 0; // file received
+                _Flags_Ctrl.APPENDsend = 0; // file received
             }
-            else if (SIZESend) // chain size FN; read FN;
+            else if (_Flags_Ctrl.SIZESend) // chain size FN; read FN;
             {
-                SIZESend = 0;
-                READSend = 1;
+                _Flags_Ctrl.SIZESend = 0;
+                _Flags_Ctrl.READSend = 1;
                 I2C.RetransComI2C = 1;
                 I2C.RetransComI2CSet = 0;
-                READEndOfFile = 0;
-                READFindStart = 0;
+                _Flags_Ctrl.READEndOfFile = 0;
+                _Flags_Ctrl.READFindStart = 0;
                 Puts("read ");
                 Puts(FileName);
                 putch(0x0a);
             }
-            else if (READSend)
+            else if (_Flags_Ctrl.READSend)
             {
-                READFindStart = 0;
-                READFindStart = 0;
+                _Flags_Ctrl.READFindStart = 0;
+                _Flags_Ctrl.READFindStart = 0;
             }
             goto MEMORY_OK;
 
         }
         
-        if (MSG_12)
+        if (_Flags_Ctrl.MSG_12)
         {
             if (bByte == '<')
             {
                 Puts("\x26\x26\x26\x26"); // force openlog to Command mode
-                MEMinCMDmode = 0;
+                _Flags_Ctrl.MEMinCMDmode = 0;
 MEMORY_OK:
-                Memory_OK = 1;
-                MSG_12 = 0;
+                _Flags_Ctrl.Memory_OK = 1;
+                _Flags_Ctrl.MSG_12 = 0;
             }
             goto SKIP_BYTE;
         }
@@ -319,11 +361,11 @@ MEMORY_OK:
 #include "commc3.h"
        
 // additional code:
-        if (GetJpegFile)
+        if (_Flags_Ctrl.GetJpegFile)
         {
-            if (GetJpegF_b3)
+            if (_Flags_Ctrl.GetJpegF_b3)
             {
-                if (GetJpegF_b1)
+                if (_Flags_Ctrl.GetJpegF_b1)
                     goto SKIP_BYTE;
 
                 putch(bByte); // TBD needs to check for 4 Ctrl-Z
@@ -347,7 +389,7 @@ MEMORY_OK:
                             else
                             {
                                 I2C.EchoWhenI2C = 1;
-                                GetJpegFile = 0;
+                                _Flags_Ctrl.GetJpegFile = 0;
                                 Puts("\x26\x26\x26\x26"); // force MEM to Command mode
                             }
                         }
@@ -357,32 +399,32 @@ MEMORY_OK:
             }
             else
             {
-                if (GetJpegF_b2)
+                if (_Flags_Ctrl.GetJpegF_b2)
                 {
-                    if (GetJpegF_b1)
+                    if (_Flags_Ctrl.GetJpegF_b1)
                     {
                         JpegLenL = bByte;
-                        GetJpegF_b3 = 1;
-                        GetJpegF_b1 = 0;
+                        _Flags_Ctrl.GetJpegF_b3 = 1;
+                        _Flags_Ctrl.GetJpegF_b1 = 0;
                     }
                     else
                     {
                         JpegLenH = bByte;
-                        GetJpegF_b1 = 1;
+                        _Flags_Ctrl.GetJpegF_b1 = 1;
                     }
                 }
                 else
                 {
-                    if(GetJpegF_b1)
+                    if(_Flags_Ctrl.GetJpegF_b1)
                     {
                         JpegLenH1 = bByte;
-                        GetJpegF_b1 = 0; // this is a byte 0x32
-                        GetJpegF_b2 = 1;
+                        _Flags_Ctrl.GetJpegF_b1 = 0; // this is a byte 0x32
+                        _Flags_Ctrl.GetJpegF_b2 = 1;
                     }
                     else
                     {
                         JpegLenH2 = bByte;
-                        GetJpegF_b1 = 1; // this is a bByte 0x00
+                        _Flags_Ctrl.GetJpegF_b1 = 1; // this is a bByte 0x00
                     }
                 }
 
@@ -410,11 +452,11 @@ NAME_DONE:
         {
             if (bByte == 0x76)  // request over from Camera to store jpeg
             {
-                GetJpegFile = 1;
-                GetJpegF_b1 = 0;
-                GetJpegF_b2 = 0;
-                GetJpegF_b3 = 0;
-                if (MEMinCMDmode)
+                _Flags_Ctrl.GetJpegFile = 1;
+                _Flags_Ctrl.GetJpegF_b1 = 0;
+                _Flags_Ctrl.GetJpegF_b2 = 0;
+                _Flags_Ctrl.GetJpegF_b3 = 0;
+                if (_Flags_Ctrl.MEMinCMDmode)
                 {
 SEND_APPEND:
                     putch(0x0a);
@@ -422,14 +464,14 @@ SEND_APPEND:
                 }
                 else
                 {
-                    GetJpegF_b1 = 1; // skipping everything
-                    GetJpegF_b3 = 1;
+                    _Flags_Ctrl.GetJpegF_b1 = 1; // skipping everything
+                    _Flags_Ctrl.GetJpegF_b3 = 1;
                 }
                 goto SKIP_BYTE;
             }
             else if (bByte == 'R') // reset/init CMD
             {
-                if (MEMinCMDmode)
+                if (_Flags_Ctrl.MEMinCMDmode)
                 {
                     Puts("init\x0a");
                 }
@@ -440,31 +482,31 @@ SEND_APPEND:
             }
             else if (bByte == 'G') // prepear to get file from anybody
             {
-                if (MEMinCMDmode)
+                if (_Flags_Ctrl.MEMinCMDmode)
                 {
                     Puts("rm ");
                     Puts(FileName);
                     putch(0x0a);
-                    RMSend = 1;
+                    _Flags_Ctrl.RMSend = 1;
                 }
             }
             else if (bByte == 'O') // prepear to output file to anybody
             {
-                if (MEMinCMDmode)
+                if (_Flags_Ctrl.MEMinCMDmode)
                 {
                     Puts("size ");
                     Puts(FileName);
                     putch(0x0a);
-                    SIZESend = 1;
-                    SIZEBegin = 0;
-                    SIZEEnd = 0;
+                    _Flags_Ctrl.SIZESend = 1;
+                    _Flags_Ctrl.SIZEBegin = 0;
+                    _Flags_Ctrl.SIZEEnd = 0;
                 }
             }
             else if (bByte == 'E') // execute file
             {
-                if (MEMinCMDmode)
+                if (_Flags_Ctrl.MEMinCMDmode)
                 {
-                    ExSend = 1;
+                    _Flags_Ctrl.ExSend = 1;
                     Puts("read ");
                     Puts(FileName);
                     putch(0x0a);
@@ -485,10 +527,10 @@ unsigned char CallBkComm(void) // return 1 == process queue; 0 == do not process
                                // 2 = do not process and finish process 3 == process and finish internal process
 {                              // in case 0 fucntion needs to pop queue byte by itself
     unsigned char bBy;
-    if (READSend) // is this retransmit over I2C the file?
+    if (_Flags_Ctrl.READSend) // is this retransmit over I2C the file?
     {
         bBy = AInQu.Queue[AInQu.iExit]; // function called when Queue is not empty; check next pop byte in queue
-        if (READFindStart)
+        if (_Flags_Ctrl.READFindStart)
         {
             if (bBy == UnitADR) // needs to ESC
                 goto SET_FOR_ESC_ADR;
@@ -513,20 +555,20 @@ SET_FOR_ESC_ADR:
                 else
                 {
                      // jpeg done
-                     READEndOfFile = 1;
+                     _Flags_Ctrl.READEndOfFile = 1;
                      return 2;
                 }
             }
 
         }
-        else if (READEndOfFile)
+        else if (_Flags_Ctrl.READEndOfFile)
         {
             
         }
         else // starting of a file did not found yet
         {
             if (bBy == 0xa)
-                READFindStart = 1;
+                _Flags_Ctrl.READFindStart = 1;
             else
             {
                 W = getch();
