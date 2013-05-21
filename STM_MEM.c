@@ -1,5 +1,5 @@
 /***********************************************************************
-    2011 (C) Alex Dobrianski memory storage/camera/backup comm/command controller module
+    2011-2013 (C) Alex Dobrianski memory storage/camera/backup comm/command controller module
     works with OpenLog https://github.com/nseidle/OpenLog/wiki
 
     This program is free software: you can redistribute it and/or modify
@@ -38,8 +38,8 @@ see www.adobri.com for communication protocol spec
 // -g -Wall -save-temps -O1 -Wa,-ahlsnd="$(BINDIR_)$(INFILEBASE).lst"
 ////////////////////////////////////////////
 
-#define MY_UNIT '5' 
-#define MAX_COM_TOPOLOGY_UNIT '5'
+#define MY_UNIT '2' 
+#define MAX_COM_TOPOLOGY_UNIT '2'
 
 //#define ALLOW_RELAY_TO_NEW
 #ifdef __18CXX
@@ -56,6 +56,29 @@ see www.adobri.com for communication protocol spec
 #define _18F2321 1
 #endif
 #endif
+#ifdef __18F25K20
+#define _18F25K20 1
+#endif
+
+////////////////////////////////////////////
+// listing in C30
+// -Wa,-ahlsnd="$(BINDIR_)$(INFILEBASE).lst"
+// -g - debugging information
+// -O1 - optimization looks good
+// -02 and -O3 does something that code is not recognizable - can be dangerouse
+// -fpack-struct pack struct
+// -save-temps 
+// -funroll-loops this will make loops big, ugly but fast
+////////////////////////////////////////////
+// -g -Wall -save-temps -O1 -Wa,-ahlsnd="$(BINDIR_)$(INFILEBASE).lst"
+////////////////////////////////////////////
+
+// it can be only master support: pic works in master mode only=> uncomment this line if 
+//     no multimaster support on a bus
+#define I2C_ONLY_MASTER 1
+
+// master support done via interrupts and firmware - commenting next line and I2C will be a software work
+#define I2C_INT_SUPPORT 1
 
 
 #ifdef _PIC16F88
@@ -104,6 +127,34 @@ see www.adobri.com for communication protocol spec
 
 
 #ifdef __PIC24H__
+
+#define INIT_CAMERA PutsCom2("\x56\x00\x26\x00");
+#define TAKE_PICTURE PutsCom2("\x56\x00\x36\x01\x00");
+#define GET_PICTURE_LEN PutsCom2("\x56\x00\x34\x01\x00");
+#define PICTURE_640_480 PutsCom2("\x56\x00\x31\x05\x04\x01\x00\x19\x00");
+#define PICTURE_320_240 PutsCom2("\x56\x00\x31\x05\x04\x01\x00\x19\x11");
+#define PICTURE_160_120 PutsCom2("\x56\x00\x31\x05\x04\x01\x00\x19\x22");
+
+#define HD_Camera_On   bset(PORTAbits,RA8);
+#define HD_Camera_Off  bclr(PORTAbits,RA8);
+
+#define HD_Camera_Click_Press   bset(PORTAbits,RA9); 
+#define HD_Camera_Click_Release bclr(PORTAbits,RA9); 
+
+#define HD_Camera_Video_Press   bset(PORTCbits,RC3); 
+#define HD_Camera_Video_Release bclr(PORTCbits,RC3); 
+
+#define FLASH_DISK_to_MEM       bset(PORTCbits,RC4); 
+#define FLASH_DISK_to_HD_camera bclr(PORTCbits,RC4); 
+
+#define GPS_On                  bset(PORTCbits,RC5); 
+#define GPS_Off                 bclr(PORTCbits,RC5); 
+
+#define COM_to_Camera  bset(PORTBbits,RB12); bset(PORTBbits,RB11);
+#define COM_to_MEM     bclr(PORTBbits,RB12); bset(PORTBbits,RB11);
+#define COM_to_backup  bset(PORTBbits,RB13); bclr(PORTBbits,RB11);
+#define COM_to_GPS     bclr(PORTBbits,RB13); bclr(PORTBbits,RB11);
+
 // SSCLOCK RA0(pin2), SSDATA_IN RA1(pin3), SSDATA_OUT RA2(pin9), SSCS RA3(pin10)
 //#define SSPORT  LATAbits
 //#define SSCLOCK LATA0
@@ -116,6 +167,7 @@ see www.adobri.com for communication protocol spec
 #define SSDATA_IN RA1
 #define SSDATA_OUT RA2
 #define SSCS       RA3
+
 #else
 // SSCLOCK RA7(pin9), SSDATA_IN RA6(pin10), SSDATA_OUT RA4(pin6), SSCS RA3(pin5)
 #define SSPORT PORTA
@@ -132,34 +184,16 @@ see www.adobri.com for communication protocol spec
 
 //
 // additional code:
-struct _FLAG_CTRL{
+#pragma rambank RAM_BANK_3
+struct _DataB3{
+unsigned FlashWrite:1;
+unsigned FlashWriteLen:1;
+unsigned FlashRead:1;
+} DataB3;
+unsigned char CountWrite;
 
-unsigned MSG_12:1;
-unsigned Memory_OK:1;
-unsigned MEMinCMDmode:1;
-unsigned GetJpegFile:1;
-unsigned GetJpegF_b1:1;
-unsigned GetJpegF_b2:1;
-unsigned GetJpegF_b3:1;
-unsigned RMSend:1;
-unsigned NEWSend:1;
-unsigned APPENDsend:1;
-unsigned SIZESend:1;
-unsigned READSend:1;
-unsigned READFindStart:1;
-unsigned READEndOfFile:1;
-unsigned ExSend:1;
-unsigned SIZEBegin:1;
-unsigned SIZEEnd:1;
-}_Flags_Ctrl;
+#pragma rambank RAM_BANK_1
 
-#pragma rambank 2
-unsigned char JpegLenH2;
-unsigned char JpegLenH1;
-unsigned char JpegLenH;
-unsigned char JpegLenL;
-unsigned char FileName[9];
-unsigned char SetFN;
 
 #include "commc1.h"
 unsigned char CallBkComm(void); // return 1 == process queue; 0 == do not process; 
@@ -207,19 +241,6 @@ void main()
         //UnitADR = '4';
 #include "commc6.h"
 
-        _Flags_Ctrl.MSG_12 = 0;
-        _Flags_Ctrl.Memory_OK = 0;
-        _Flags_Ctrl.MEMinCMDmode = 0;
-        SetFN = 0;
-        _Flags_Ctrl.RMSend = 0;
-        _Flags_Ctrl.NEWSend = 0;
-        _Flags_Ctrl.APPENDsend = 0;
-        _Flags_Ctrl.SIZESend = 0;
-        _Flags_Ctrl.READSend = 0;
-        _Flags_Ctrl.READFindStart = 0;
-        _Flags_Ctrl.READEndOfFile = 0;
-        _Flags_Ctrl.SIZEBegin = 0;
-        _Flags_Ctrl.SIZEEnd = 0;
     }
 #ifndef __PIC24H__
     PEIE = 1;    // bit 6 PEIE: Peripheral Interrupt Enable bit
@@ -255,271 +276,16 @@ void ProcessCMD(unsigned char bByte)
     long *FileLen;
     if (!Main.getCMD) // CMD not receved et.
     {
-        // this is massages from COM connected to openLog 
-        if (_Flags_Ctrl.ExSend)
-        {
-            if (bByte == 0x0a)
-            {
-                Main.getCMD = 1;
-            }
-            goto SKIP_BYTE;
-        }
-        if (_Flags_Ctrl.SIZESend)
-        {
-            if (_Flags_Ctrl.SIZEEnd)
-            {
-            }
-            else if (_Flags_Ctrl.SIZEBegin)
-            {
-                if (bByte == 0x0a)
-                {
-                    _Flags_Ctrl.SIZEBegin = 0;
-                    _Flags_Ctrl.SIZEEnd = 1;
-                }
-                else
-                {
-                    // TBD 4 bytes !! not 2 !!!
-                    FileLen = &JpegLenH;
-                    wWork = *FileLen;
-                    wWork *= 10;
-                    wWork = bWork - '0';
-                    *FileLen = wWork;
-                }
-            }
-            else
-            {
-                if (bByte == 0xa)
-                {
-                    _Flags_Ctrl.SIZEBegin = 1;
-                    FileLen = 0;
-                }
-            }
-            goto SKIP_BYTE;
-        }
-        if (bByte == '>') // openlog in command mode
-        {
-            _Flags_Ctrl.MEMinCMDmode = 1;
-            if (_Flags_Ctrl.RMSend) // chain rm FN; new FM; append FM; 
-            {
-                Puts("new ");
-                Puts(FileName);
-                putch(0x0a);
-                _Flags_Ctrl.RMSend = 0;
-                _Flags_Ctrl.NEWSend = 1;
-            }
-            else if (_Flags_Ctrl.NEWSend)
-            {
-                Puts("append ");
-                Puts(FileName);
-                //putch(0x0a);
-                _Flags_Ctrl.NEWSend = 0;
-                _Flags_Ctrl.APPENDsend = 1;
-            }
-            else if (_Flags_Ctrl.APPENDsend)
-            {
-                _Flags_Ctrl.APPENDsend = 0; // file received
-            }
-            else if (_Flags_Ctrl.SIZESend) // chain size FN; read FN;
-            {
-                _Flags_Ctrl.SIZESend = 0;
-                _Flags_Ctrl.READSend = 1;
-                I2C.RetransComI2C = 1;
-                I2C.RetransComI2CSet = 0;
-                _Flags_Ctrl.READEndOfFile = 0;
-                _Flags_Ctrl.READFindStart = 0;
-                Puts("read ");
-                Puts(FileName);
-                putch(0x0a);
-            }
-            else if (_Flags_Ctrl.READSend)
-            {
-                _Flags_Ctrl.READFindStart = 0;
-                _Flags_Ctrl.READFindStart = 0;
-            }
-            goto MEMORY_OK;
-
-        }
-        
-        if (_Flags_Ctrl.MSG_12)
-        {
-            if (bByte == '<')
-            {
-                Puts("\x26\x26\x26\x26"); // force openlog to Command mode
-                _Flags_Ctrl.MEMinCMDmode = 0;
-MEMORY_OK:
-                _Flags_Ctrl.Memory_OK = 1;
-                _Flags_Ctrl.MSG_12 = 0;
-            }
-            goto SKIP_BYTE;
-        }
-        else
-        {
-            goto SKIP_BYTE;
-        }
-        
 
 #include "commc3.h"
        
 // additional code:
-        if (_Flags_Ctrl.GetJpegFile)
-        {
-            if (_Flags_Ctrl.GetJpegF_b3)
-            {
-                if (_Flags_Ctrl.GetJpegF_b1)
-                    goto SKIP_BYTE;
-
-                putch(bByte); // TBD needs to check for 4 Ctrl-Z
-                if (JpegLenL)
-                    JpegLenL--;
-                else
-                {
-                    JpegLenL--;
-                    if (JpegLenH)
-                        JpegLenH--;
-                    else
-                    {
-                        JpegLenH--;
-                        if (JpegLenH1)
-                            JpegLenH1--;
-                        else
-                        {
-                            JpegLenH1--;
-                            if (JpegLenH2)
-                                JpegLenH2--;
-                            else
-                            {
-                                I2C.EchoWhenI2C = 1;
-                                _Flags_Ctrl.GetJpegFile = 0;
-                                Puts("\x26\x26\x26\x26"); // force MEM to Command mode
-                            }
-                        }
-                    }
-                }
-
-            }
-            else
-            {
-                if (_Flags_Ctrl.GetJpegF_b2)
-                {
-                    if (_Flags_Ctrl.GetJpegF_b1)
-                    {
-                        JpegLenL = bByte;
-                        _Flags_Ctrl.GetJpegF_b3 = 1;
-                        _Flags_Ctrl.GetJpegF_b1 = 0;
-                    }
-                    else
-                    {
-                        JpegLenH = bByte;
-                        _Flags_Ctrl.GetJpegF_b1 = 1;
-                    }
-                }
-                else
-                {
-                    if(_Flags_Ctrl.GetJpegF_b1)
-                    {
-                        JpegLenH1 = bByte;
-                        _Flags_Ctrl.GetJpegF_b1 = 0; // this is a byte 0x32
-                        _Flags_Ctrl.GetJpegF_b2 = 1;
-                    }
-                    else
-                    {
-                        JpegLenH2 = bByte;
-                        _Flags_Ctrl.GetJpegF_b1 = 1; // this is a bByte 0x00
-                    }
-                }
-
-            }
-            goto SKIP_BYTE;
-        }
-        else if (SetFN)
-        {
-            
-
-            bWork = SetFN;
-            bWork--;
-            if (SetFN > 8)
-                goto NAME_DONE;
-            SetFN++;
-            if (bByte == 0xa)
-            {
-NAME_DONE:
-                bByte = 0;
-                SetFN = 0;
-            }
-            FileName[bWork] = bByte;
-        }
-        else
-        {
-            if (bByte == 0x76)  // request over from Camera to store jpeg
-            {
-                _Flags_Ctrl.GetJpegFile = 1;
-                _Flags_Ctrl.GetJpegF_b1 = 0;
-                _Flags_Ctrl.GetJpegF_b2 = 0;
-                _Flags_Ctrl.GetJpegF_b3 = 0;
-                if (_Flags_Ctrl.MEMinCMDmode)
-                {
-SEND_APPEND:
-                    putch(0x0a);
-                    I2C.EchoWhenI2C = 0;
-                }
-                else
-                {
-                    _Flags_Ctrl.GetJpegF_b1 = 1; // skipping everything
-                    _Flags_Ctrl.GetJpegF_b3 = 1;
-                }
-                goto SKIP_BYTE;
-            }
-            else if (bByte == 'R') // reset/init CMD
-            {
-                if (_Flags_Ctrl.MEMinCMDmode)
-                {
-                    Puts("init\x0a");
-                }
-            }
-            else if (bByte == 'S') // set file name
-            {
-                SetFN = 1;
-            }
-            else if (bByte == 'G') // prepear to get file from anybody
-            {
-                if (_Flags_Ctrl.MEMinCMDmode)
-                {
-                    Puts("rm ");
-                    Puts(FileName);
-                    putch(0x0a);
-                    _Flags_Ctrl.RMSend = 1;
-                }
-            }
-            else if (bByte == 'O') // prepear to output file to anybody
-            {
-                if (_Flags_Ctrl.MEMinCMDmode)
-                {
-                    Puts("size ");
-                    Puts(FileName);
-                    putch(0x0a);
-                    _Flags_Ctrl.SIZESend = 1;
-                    _Flags_Ctrl.SIZEBegin = 0;
-                    _Flags_Ctrl.SIZEEnd = 0;
-                }
-            }
-            else if (bByte == 'E') // execute file
-            {
-                if (_Flags_Ctrl.MEMinCMDmode)
-                {
-                    _Flags_Ctrl.ExSend = 1;
-                    Puts("read ");
-                    Puts(FileName);
-                    putch(0x0a);
-                }
-            }
-        }
-      
 
 #include "commc4.h"
 // additional code:
         //else if (bByte == 'F') // set file name
         
-SKIP_BYTE:
+SKIP_BYTE:;
     } // do not confuse: this is a else from Main.getCMD == 1
 }
 
@@ -527,55 +293,10 @@ unsigned char CallBkComm(void) // return 1 == process queue; 0 == do not process
                                // 2 = do not process and finish process 3 == process and finish internal process
 {                              // in case 0 fucntion needs to pop queue byte by itself
     unsigned char bBy;
-    if (_Flags_Ctrl.READSend) // is this retransmit over I2C the file?
-    {
-        bBy = AInQu.Queue[AInQu.iExit]; // function called when Queue is not empty; check next pop byte in queue
-        if (_Flags_Ctrl.READFindStart)
-        {
-            if (bBy == UnitADR) // needs to ESC
-                goto SET_FOR_ESC_ADR;
-            else if (bBy == '@') // needs to ESC
-            {
-SET_FOR_ESC:
-                //if (UseCom)
-                //{
-SET_FOR_ESC_ADR:
-                    Main.ESCNextByte = 1;
-                //}
-                //else
-                //    I2C.ESCI2CChar = 1;
-            }
-            if (JpegLenL)
-                JpegLenL--;
-            else
-            {
-                JpegLenL--;
-                if (JpegLenH)
-                    JpegLenH--;
-                else
-                {
-                     // jpeg done
-                     _Flags_Ctrl.READEndOfFile = 1;
-                     return 2;
-                }
-            }
-
-        }
-        else if (_Flags_Ctrl.READEndOfFile)
-        {
-            
-        }
-        else // starting of a file did not found yet
-        {
-            if (bBy == 0xa)
-                _Flags_Ctrl.READFindStart = 1;
-            else
-            {
-                W = getch();
-                return 0;
-            }
-         }
-    }
+    //if (_Flags_Ctrl.READSend) // is this retransmit over I2C the file?
+    //{
+    //    //bBy = AInQu.Queue[AInQu.iExit]; // function called when Queue is not empty; check next pop byte in queue
+    //}
     return 1; // this will process next byte 
 }
 unsigned char CallBkI2C(void)
@@ -666,8 +387,6 @@ void Reset_device(void)
 // (gray)        PGEC1/AN3/C2IN+/RP1(1)/CN5/RB1 |pin22             pin23| AN4/C1IN-/RP2(1)/CN6/RB2         <= analog Q1 IR
 
 
-
-
     // disable analog
 	AD1CON1bits.ADON = 0; 
     // and switch analog pins to digital
@@ -684,8 +403,6 @@ void Reset_device(void)
     __builtin_write_OSCCONL(OSCCON & 0xbf); // unlock port remapping
     // INT0 == pin 16 
     // INT1 == pin 21 == PR10 
-#ifdef HI_TECH_C
-#else
     IN_FN_PPS_INT1 = IN_PIN_PPS_RP10; // RPINR0 
     // INT2 == pin 22 == PR11
     IN_FN_PPS_INT2 = IN_PIN_PPS_RP11;
@@ -694,7 +411,7 @@ void Reset_device(void)
     IN_FN_PPS_U1RX = IN_PIN_PPS_RP5;
 	// RR6 - Serial TX  Pin 15
     OUT_PIN_PPS_RP6 = OUT_FN_PPS_U1TX;
-#endif
+
     // I2C:
     // SCL1 = I2C clock Pin 17 (this is NOT alernative I2c set as FPOR = 1 in configuration) 
     // SDA1 = I2C data Pin 18  this two pins permamet
@@ -733,263 +450,9 @@ void Reset_device(void)
     INTEDG2 = 1;    
 
 #else
-// this is will be better at the begining of a program
-    OSCCON = 0b01110000; //OSCILLATOR CONTROL REGISTER (ADDRESS 8Fh)
-                         // bit 6-4 IRCF<2:0>: Internal RC Oscillator Frequency Select bits
-                         //         000 = 31.25 kHz
-                         //         001 = 125 kHz
-                         //         010 = 250 kHz
-                         //         011 = 500 kHz
-                         //         100 = 1 MHz
-                         //         101 = 2 MHz
-                         //         110 = 4 MHz
-                         //         111 = 8 MHz
-                         // bit 3 OSTS: Oscillator Start-up Time-out Status bit(1)
-                         //   1 = Device is running from the primary system clock
-                         //   0 = Device is running from T1OSC or INTRC as a secondary system clock
-                         //    Note 1: Bit resets to µ0¦ with Two-Speed Start-up mode and LP, XT or HS selected as the
-                         //    oscillator mode.
-                         // bit 2 IOFS: INTOSC Frequency Stable bit
-                         //   1 = Frequency is stable
-                         //   0 = Frequency is not stable
-                         // bit 1-0 SCS<1:0>: Oscillator Mode Select bits
-                         //   00 = Oscillator mode defined by FOSC<2:0>
-                         //   01 = T1OSC is used for system clock
-                         //   10 = Internal RC is used for system clock
-                         //   11 = Reserved
-#ifdef _NOT_SIMULATOR
-    while((OSCCON&0b00000100) == 0); //Wait for frequency to stabilize
-#endif
-
-#ifdef _18F2321
-    PLLEN = 1;
-#ifdef _NOT_SIMULATOR
-    while((OSCCON&0b00000100) == 0); //Wait for frequency to stabilize
-#endif
-
-	ADCON0 = 0b00000000;
-    ADCON1 = 0b00001111;
-    // SPI output in FLASH mem terminoligy:
-    // SSCLOCK RA7(pin9), SSDATA_IN RA6(pin10), SSDATA_OUT RA4(pin6), SSCS RA3(pin5)
-    //          0            0                        IN                  1
-    TRISA = 0b00010000;  //0 = Output, 1 = Input 
-    PORTA = 0b00001000;
-    // RB0 - external INT Pin 21
-    // RB1 - external INT Pin 22
-    TRISB = 0b00000011;  //0 = Output, 1 = Input 
-    PORTB = 0b00000000;
-
-    // RC7 - Serial RX  Pin 18
-	// RC6 - Serial TX Pin 17
-    // I2C:
-    // RC3 - SCL = I2C clock Pin 14
-    // RC4 - SDA = I2C data Pin 15
-    TRISC = 0b10011000;  //0 = Output, 1 = Input 
-    PORTC = 0b01000000;
-     
-    //RBPU_ = 0;
-    //bitclr(OPTION,RBPU_); //Each of the PORTB pins has a weak internal pull-up. A
-                          //single control bit can turn on all the pull-ups. This is
-                          //performed by clearing bit RBPU (OPTION_REG<7>).
-                          //The weak pull-up is automatically turned off when the
-                          //port pin is configured as an output. The pull-ups are
-                          //disabled on a Power-on Reset.
-                          
-
-    // RE3 (pin1) MCLR == input 
-    //TRISE = 0x00001000;
-
-    PORTE = 0b11111111; 
-    INT0_ENBL = 0; // disable external interrupt for GYRO 1
-    INT1IE = 0;    // disbalke external interrupt for GYRO2
-
-#else // done _18F2321
-#ifdef _16F884
-    ANSEL =   0b00000000; //Turn pins to Digital instead of Analog
-    CM2CON0 = 0b00000111; //Turn off comparator on RA port
-    CM1CON0 = 0b00000111;
-    // for each unit it is individual
-    // RA0,1,2,3,4 this will be stepper motor control 1A,2A,1B,2B,ENBL
-    //TRISA = 0b10100000;  //0 = Output, 1 = Input 
-    //PORTA = 0b00000000;
-
-    // serial FLASH pin assignment 
-    // SSCLOCK RA7(pin16), SSDATA_IN RA6(pin15), SSDATA_OUT RA4, SSCS RA3
-    //          0                0                   IN             1
-    TRISA = 0b00110000;  //0 = Output, 1 = Input 
-    PORTA = 0b00001000;  // SSCS set high
-
-    // RB0 - external INT Pin 6
-    TRISB = 0b00000001;  //0 = Output, 1 = Input 
-    PORTB = 0b11111110;  
-
-	// RC6 - Serial Out  Pin 25
-	// RC7 - Serial In Pin 26
-    // I2C:
-    // RC3 - SCL = I2C clock Pin 18
-    // RC4 - SDA = I2C data Pin 23
-    // RB0 - external INT Pin 33
-    TRISC = 0b10011000;  //0 = Output, 1 = Input 
-    PORTC = 0b01000000;  
-    //RBPU_ = 0;
-    //bitclr(OPTION,RBPU_); //Each of the PORTB pins has a weak internal pull-up. A
-                          //single control bit can turn on all the pull-ups. This is
-                          //performed by clearing bit RBPU (OPTION_REG<7>).
-                          //The weak pull-up is automatically turned off when the
-                          //port pin is configured as an output. The pull-ups are
-                          //disabled on a Power-on Reset.
-                
-    TRISD = 0b11111111; //0 = Output, 1 = Input 
-    PORTD = 0b00000000;        
-  
-    // RE7 (pin1) MCLR == input
-    TRISE = 0b11111111; //0 = Output, 1 = Input 
-    TRISE = 0b10000000;
-    INT0_ENBL = 0; // disable external interrupt for GYRO 1
-
-#else // done _18F2321 & _16F884
-    ANSEL = 0b00000000; //Turn pins to Digital instead of Analog
-    CMCON = 0b00000111; //Turn off comparator on RA port
-    // for each unit it is individual
-    // RA0,1,2,3,4 this will be stepper motor control 1A,2A,1B,2B,ENBL
-    //TRISA = 0b10100000;  //0 = Output, 1 = Input 
-    //PORTA = 0b00000000;
-
-    // RA5 MCLR == input
-    // serial FLASH pin assignment 
-    // SSCLOCK RA7(pin16), SSDATA_IN RA6(pin15), SSDATA_OUT RA4(pin3), SSCS RA3(pin2)
-    //          0                0                   IN             1
-    TRISA = 0b00110000;  //0 = Output, 1 = Input 
-    PORTA = 0b00001000;  // SSCS set high
-
-
-	// RB5 - Serial Out  Pin 11
-	// RB2 - Serial In Pin 8
-    // I2C:
-    // RB4 - SCL = I2C clock Pin 10
-    // RB1 - SDA = I2C data Pin 7
-    // RB0 - external INT Pin 6
-    
-                         // RB2 - serial input
-                         // RB5 - serial out 
-    TRISB = 0b00010111;  //0 = Output, 1 = Input 
-    PORTB = 0b11111111;  
-    //RBPU_ = 0;
-    //bitclr(OPTION,RBPU_); //Each of the PORTB pins has a weak internal pull-up. A
-                          //single control bit can turn on all the pull-ups. This is
-                          //performed by clearing bit RBPU (OPTION_REG<7>).
-                          //The weak pull-up is automatically turned off when the
-                          //port pin is configured as an output. The pull-ups are
-                          //disabled on a Power-on Reset.
-    INT0_ENBL = 0; // disable external interrupt for GYRO 1
-                          
-#endif
-#endif
-    //RBIF = 0;
-    //RBIE = 1;
-    
-    enable_uart(); //Setup the hardware UART for 20MHz at 9600bps
-    // next two bits has to be set after all intialization done
-    //PEIE = 1;    // bit 6 PEIE: Peripheral Interrupt Enable bit
-                 // 1 = Enables all unmasked peripheral interrupts
-                 // 0 = Disables all peripheral interrupts
-    //GIE = 1;     // bit 7 GIE: Global Interrupt Enable bit
-                 // 1 = Enables all unmasked interrupts
-                 // 0 = Disables all interrupts
-    enable_I2C();
-    TIMER0_INT_FLG = 0; // clean timer0 interrupt
-    TIMER0_INT_ENBL = 0; // diasable timer0 interrupt
-    TMR1IF = 0; // clean timer0 interrupt
-    TMR1IE = 0; // diasable timer0 interrupt
-    INT0_EDG = 0; // high -> low == interrupt
-    INT0_FLG = 0; // clean extrnal interrupt RB0 pin 6
-#ifdef _18F2321
-    INT1IF = 0;
-    INTEDG1 = 0;    
-#endif
-    //INT0IE = 1; // enable external interrupt
 #endif
 }
 
-/*
-void Reset_device(void)
-{
-    // this is will be better at the begining of a program
-    OSCCON = 0b01110000; //OSCILLATOR CONTROL REGISTER (ADDRESS 8Fh)
-                         // bit 6-4 IRCF<2:0>: Internal RC Oscillator Frequency Select bits
-                         //         000 = 31.25 kHz
-                         //         001 = 125 kHz
-                         //         010 = 250 kHz
-                         //         011 = 500 kHz
-                         //         100 = 1 MHz
-                         //         101 = 2 MHz
-                         //         110 = 4 MHz
-                         //         111 = 8 MHz
-                         // bit 3 OSTS: Oscillator Start-up Time-out Status bit(1)
-                         //   1 = Device is running from the primary system clock
-                         //   0 = Device is running from T1OSC or INTRC as a secondary system clock
-                         //    Note 1: Bit resets to ‘0’ with Two-Speed Start-up mode and LP, XT or HS selected as the
-                         //    oscillator mode.
-                         // bit 2 IOFS: INTOSC Frequency Stable bit
-                         //   1 = Frequency is stable
-                         //   0 = Frequency is not stable
-                         // bit 1-0 SCS<1:0>: Oscillator Mode Select bits
-                         //   00 = Oscillator mode defined by FOSC<2:0>
-                         //   01 = T1OSC is used for system clock
-                         //   10 = Internal RC is used for system clock
-                         //   11 = Reserved
-#ifdef _NOT_SIMULATOR
-    while((OSCCON&0b00000100) == 0); //Wait for frequency to stabilize
-#endif
-
-    ANSEL = 0b00000000; //Turn pins to Digital instead of Analog
-#ifdef _PIC16F88
-    CMCON = 0b00000111; //Turn off comparator on RA port-> TBD may be it should be 0x00 ??
-#endif
-#ifdef _PIC16F884
-    CM1CON0 =0b00000000;
-    CM2CON0 =0b00000000;
-#endif
-    // for each unit it is individual
-                         // RA0,1,2,3,4,7 this will be DATA0,1,2,3,4,5
-    TRISA = 0b11110000;  //0 = Output, 1 = Input 
-    PORTA = 0b00000000;
-
-	// RB5 - Serial Out  Pin 11
-	// RB2 - Serial In Pin 8
-    // I2C:
-    // RB4 - SCL = I2C clock Pin 10
-    // RB1 - SDA = I2C data Pin 7
-    
-                         // RB2 - serial input
-                         // RB5 - serial out 
-    TRISB = 0b00010110;  //0 = Output, 1 = Input 
-    //RBPU_ = 0;
-    //bitclr(OPTION,RBPU_); //Each of the PORTB pins has a weak internal pull-up. A
-                          //single control bit can turn on all the pull-ups. This is
-                          //performed by clearing bit RBPU (OPTION_REG<7>).
-                          //The weak pull-up is automatically turned off when the
-                          //port pin is configured as an output. The pull-ups are
-                          //disabled on a Power-on Reset.
-                          
-    PORTB = 0b11111111;  
-
-    //RBIF = 0;
-    //RBIE = 1;
-    
-    enable_uart(); //Setup the hardware UART for 20MHz at 9600bps
-    // next two bits has to be set after all intialization done
-    //PEIE = 1;    // bit 6 PEIE: Peripheral Interrupt Enable bit
-                 // 1 = Enables all unmasked peripheral interrupts
-                 // 0 = Disables all peripheral interrupts
-    //GIE = 1;     // bit 7 GIE: Global Interrupt Enable bit
-                 // 1 = Enables all unmasked interrupts
-                 // 0 = Disables all interrupts
-    enable_I2C();
-
-
-}
-*/
 
 void ShowMessage(void)
 {
