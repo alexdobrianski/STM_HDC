@@ -3304,6 +3304,25 @@ void Reset_device(void)
                                         //    1 = Indicates that PLL is in lock, or PLL start-up timer is satisfied
                                         //    0 = Indicates that PLL is out of lock, start-up timer is in progress or PLL is disabled
 
+    // CLKDIV:
+    //     bit 15 ROI: Recover on Interrupt bit
+    //         1 = Interrupts clears the DOZEN bit and the processor clock/peripheral clock ratio is set to 1:1
+    //         0 = Interrupts have no effect on the DOZEN bit
+    //     bit 14-12 DOZE<2:0>: Processor Clock Reduction Select bits
+    //       111 = FCY/128
+    //       110 = FCY/64
+    //       101 = FCY/32
+    //       100 = FCY/16
+    //       011 = FCY/8 (default)
+    //       010 = FCY/4
+    //       001 = FCY/2
+    //       000 = FCY/1
+    //    bit 11 DOZEN: DOZE Mode Enable bit(1)
+    //         1 = The DOZE<2:0> bits specify the ratio between the peripheral clocks and the processor clocks
+    //         0 = Processor clock/peripheral clock ratio forced to 1:1
+    CLKDIVbits.DOZE = 0b101 ; // speed of a processor is 40MOP => DOZE = 1.25 MOP (like 88)
+    CLKDIVbits.ROI = 1;
+
 //                                                       PIC24HJ128GP504
 // I2C SDA            SDA1/RP9(1)/CN21/PMD3/RB9 |pin1              pin44| SCL1/RP8(1)/CN22/PMD4/RB8           I2C SCL
 //                        RP22(1)/CN18/PMA1/RC6 |pin2              pin43| INT0/RP7(1)/CN23/PMD5/RB7           COM2 =>
@@ -3330,17 +3349,38 @@ void Reset_device(void)
 // (gray)        PGEC1/AN3/C2IN+/RP1(1)/CN5/RB1 |pin22             pin23| AN4/C1IN-/RP2(1)/CN6/RB2         <= analog Q1 IR
 
 
+    // ANALOG configuration (for IR detector)
     // disable analog
 	AD1CON1bits.ADON = 0; 
     // and switch analog pins to digital
     AD1PCFGL = 0xffff;
     //AD1PCFGH = 0xffff;
-    // porta is not re-mappable and on 502 device it is RA0-RA4
+
+     // PORTA settings
+    // porta is not re-mappable and on 504 device it is RA0-RA4 RA7=RA10
     // SPI output in FLASH mem terminoligy:
-    // SSCLOCK RA0(pin2), SSDATA_IN RA1(pin3), SSDATA_OUT RA2(pin9), SSCS RA3(pin10)
+    // SSCLOCK RA0(pin19), SSDATA_IN RA1(pin20), SSDATA_OUT RA2(pin30), SSCS RA3(pin31)
     //          0            0                        IN                  1
-    TRISA = 0b00000100;  //0 = Output, 1 = Input 
-    PORTA = 0b00001000;
+    // RA7(pin13) - not used output
+    // RA8(pin32) HD Camera ON/OFF button (0) not pressed (1) pressed
+    // RA9(pin35) HD Camera click1 button to click (0) not pressed (1) pressed
+    // RA10(pin12) - output - not used
+    TRISA = 0b0000000000000100;  //0 = Output, 1 = Input 
+    PORTA = 0b0000000000001000;
+
+    // PORTB
+    // pin24| RB3 pin23| RB2 RB1 |pin22 RB0 |pin21 
+    //TRISB = 0b0000000000000100;  //0 = Output, 1 = Input 
+    //PORTB = 0b0000000000001000;
+    TRISBbits.TRISB12=0;    PORTBbits.RB12 =0; // <=SW1 COM2  
+    TRISBbits.TRISB13=0;    PORTBbits.RB13 =0; // <=SW2 COM2  
+    TRISBbits.TRISB11=0;    PORTBbits.RB11 =0; // <=SW3 COM2  
+    
+    TRISCbits.TRISC3=0;     PORTCbits.RC3 =0;  // HD Camera VIDEO record
+    TRISCbits.TRISC4=0;     PORTCbits.RC4 =0;  // Switch MicroSD -> HDcam / MEM
+    TRISCbits.TRISC5=0;     PORTCbits.RC5 =0;  // ON/OFF power GPS
+    
+
     // this kaind funny, and for PIC24 and up = PRX pins can be reassigned to differrent preferias
     // additionaly needs to remember on which pin sits which PRX : // VSIAK SVERCHOK ZNAI SVOI SHESTOK
     __builtin_write_OSCCONL(OSCCON & 0xbf); // unlock port remapping
@@ -3357,27 +3397,51 @@ void Reset_device(void)
     OUT_PIN_PPS_RP6 = OUT_FN_PPS_U1TX;
 
     // com2 == serial loop from (a) backup (b) GPS (c) camera (d) memory
-
-    // PR5 - Serial2 RX  Pin 14
+    // PR7 - Serial2 RX  Pin 43
     IN_FN_PPS_U2RX = IN_PIN_PPS_RP7;
-	// RR6 - Serial2 TX  Pin 15
+	// RR10 - Serial2 TX  Pin 8
     OUT_PIN_PPS_RP10 = OUT_FN_PPS_U2TX;
 
     // I2C:
     // SCL1 = I2C clock Pin 17 (this is NOT alernative I2c set as FPOR = 1 in configuration) 
     // SDA1 = I2C data Pin 18  this two pins permamet
     __builtin_write_OSCCONL(OSCCON | 0x40); //lock back port remapping
-     
-    //RBPU_ = 0;
-    //bitclr(OPTION,RBPU_); //Each of the PORTB pins has a weak internal pull-up. A
-                          //single control bit can turn on all the pull-ups. This is
-                          //performed by clearing bit RBPU (OPTION_REG<7>).
-                          //The weak pull-up is automatically turned off when the
-                          //port pin is configured as an output. The pull-ups are
-                          //disabled on a Power-on Reset.
 
-    INT0_ENBL = 0; // disable external interrupt for GYRO 1
-    INT1IE = 0;    // disable external interrupt for GYRO2
+
+  // enable secondary oscilator
+
+    OSCCONbits.LPOSCEN = 1;
+
+    __builtin_write_OSCCONL(OSCCON | 0x40); //lock back port remapping
+
+    TRISBbits.TRISB11=1;
+     RtccInitClock();       //turn on clock source
+     RtccWrOn();            //enable RTCC peripheral
+     //RtccWriteTimeDate(&RtccTimeDate,TRUE);
+     //RtccReadTimeDate(&RtccTimeDateVal);
+     mRtccOn();
+     RtccReadTimeDate(&RtccTimeDateVal);
+     if ((RtccTimeDateVal.f.mday > 0x31) ||
+         ((RtccTimeDateVal.f.mday & 0x0f) > 0x9) || 
+         (RtccTimeDateVal.f.mon > 0x12) ||
+         ((RtccTimeDateVal.f.mon & 0x0f) > 0x9) || 
+         (RtccTimeDateVal.f.year < 0x12) ||
+         (RtccTimeDateVal.f.hour>0x24) ||
+         ((RtccTimeDateVal.f.hour & 0x0f)>0x9) )
+     {
+         RtccTimeDateVal.f.mday = 0x09;RtccTimeDateVal.f.mon=0x11;
+         RtccTimeDateVal.f.year=0x12;
+         RtccTimeDateVal.f.hour = 0x10;RtccTimeDateVal.f.min = 0x01;
+         RtccTimeDateVal.f.sec = 0x01;RtccTimeDateVal.f.wday = 0x05;
+         //mRtccOff();
+         RtccWriteTimeDate(&RtccTimeDateVal,TRUE);
+         mRtccOn();
+     }
+
+     
+
+    //INT0_ENBL = 0; // disable external interrupt for GYRO 1
+    //INT1IE = 0;    // disable external interrupt for GYRO2
     enable_uart(); //Setup the hardware UART for 20MHz at 9600bps
     // next two bits has to be set after all intialization done
     //PEIE = 1;    // bit 6 PEIE: Peripheral Interrupt Enable bit
@@ -3386,19 +3450,19 @@ void Reset_device(void)
     //GIE = 1;     // bit 7 GIE: Global Interrupt Enable bit
                  // 1 = Enables all unmasked interrupts
                  // 0 = Disables all interrupts
-    enable_I2C();
-    TIMER0_INT_FLG = 0; // clean timer0 interrupt
-    TIMER0_INT_ENBL = 0; // diasable timer0 interrupt
-    TMR1IF = 0; // clean timer0 interrupt
-    TMR1IE = 0; // diasable timer0 interrupt
-    INT0_EDG = 1; // 1 = Interrupt on negative edge
-    INT0_FLG = 0; // clean extrnal interrupt RB0 pin 6
+    //enable_I2C();
+    //TIMER0_INT_FLG = 0; // clean timer0 interrupt
+    //TIMER0_INT_ENBL = 0; // diasable timer0 interrupt
+    //TMR1IF = 0; // clean timer0 interrupt
+    //TMR1IE = 0; // diasable timer0 interrupt
+    //INT0_EDG = 1; // 1 = Interrupt on negative edge
+    //INT0_FLG = 0; // clean extrnal interrupt RB0 pin 6
 
-    INT1IF = 0;
-    INTEDG1 = 1;    
+    //INT1IF = 0;
+    //INTEDG1 = 1;    
 
-    INT2IF = 0;
-    INTEDG2 = 1;    
+    //INT2IF = 0;
+    //INTEDG2 = 1;    
 
 #else
 #endif
