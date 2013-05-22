@@ -33,6 +33,7 @@ file_005=.
 file_006=.
 file_007=.
 file_008=.
+file_009=.
 [GENERATED_FILES]
 file_000=no
 file_001=no
@@ -43,6 +44,7 @@ file_005=no
 file_006=no
 file_007=no
 file_008=no
+file_009=no
 [OTHER_FILES]
 file_000=no
 file_001=no
@@ -53,6 +55,7 @@ file_005=no
 file_006=no
 file_007=no
 file_008=no
+file_009=no
 [FILE_INFO]
 file_000=STM_MEM.c
 file_001=commc0.h
@@ -63,12 +66,14 @@ file_005=commc4.h
 file_006=commc5.h
 file_007=commc6.h
 file_008=commc7.h
+file_009=commc8.h
 [SUITE_INFO]
 suite_guid={479DDE59-4D56-455E-855E-FFF59A3DB57E}
 suite_state=
 [TOOL_SETTINGS]
 TS{7D9C6ECE-785D-44CB-BA22-17BF2E119622}=-g
-TS{25AC22BD-2378-4FDB-BFB6-7345A15512D3}=-g -Wall
+TS{25AC22BD-2378-4FDB-BFB6-7345A15512D3}=-g -Wall -save-temps -O1 -Wa,-ahlsnd="$(BINDIR_)$(INFILEBASE).lst"
+TS{25AC22BD-2378-4FDB-BFB6-7345A15512D3}_alt=yes
 TS{7DAC9A1D-4C45-45D6-B25A-D117C74E8F5A}=-o"$(BINDIR_)$(TARGETBASE).$(TARGETSUFFIX)" -Map="$(BINDIR_)$(TARGETBASE).map" --report-mem
 TS{509E5861-1E2A-483B-8B6B-CA8DB7F2DD78}=
 [INSTRUMENTED_TRACE]
