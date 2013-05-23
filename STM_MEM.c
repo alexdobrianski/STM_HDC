@@ -189,8 +189,8 @@ see www.adobri.com for communication protocol spec
 // additional code:
 #pragma rambank RAM_BANK_3
 struct _DataB3{
-unsigned FlashWrite:1;
-unsigned FlashWriteLen:1;
+unsigned FlashCmd:1;
+unsigned FlashCmdLen:1;
 unsigned FlashRead:1;
 } DataB3;
 unsigned char CountWrite;
@@ -3002,11 +3002,11 @@ DONE_DONE_I2C:
 //            in last case <length-of-packet> must include simbol '@'
 //////////////////////////////////////////////////////////////////////////////
 #ifdef SSPORT
-        if (DataB3.FlashWrite)
+        if (DataB3.FlashCmd)
         {
-            if (DataB3.FlashWriteLen)
+            if (DataB3.FlashCmdLen) // store length of a flash command
             {
-                DataB3.FlashWriteLen = 0;
+                DataB3.FlashCmdLen = 0;
                 CountWrite = bByte;
                 DataB3.FlashRead = 0;
                 CS_LOW;
@@ -3067,7 +3067,7 @@ DONE_DONE_I2C:
                 if (--CountWrite)
                     return;
 DONE_WITH_FLASH:
-                DataB3.FlashWrite = 0;
+                DataB3.FlashCmd = 0;
                 CS_HIGH;
                 if (!Main.ComNotI2C) // CMD comes from I2C - reply from read should goes back to I2C
                 {
@@ -3101,7 +3101,7 @@ DONE_WITH_FLASH:
 ///////////////////////////////////////////////////////////////////////   
 
         if (Main.SetFromAddr) //<unit>=Xci<unit> 
-        {   
+        {                     //       |         if ' ' than responce unit is not set
             if (bByte == ' ')
                 bByte = 0;
             if (bByte == '*') // this will switch stream permanently
@@ -3121,7 +3121,7 @@ DONE_WITH_FLASH:
             return;
         }
         else if (Main.SetSendCMD) //<unit>=xCi<unit> 
-        {
+        {                         //        |        if ' ' than SendCMD is not set
             if (bByte == ' ')
                 bByte = 0;
             SendCMD = bByte;
@@ -3130,7 +3130,7 @@ DONE_WITH_FLASH:
             return;
         }
         else if (I2C.SetI2CYesNo) //<unit>=xcI<unit> I= com->I2C C = I2C->com ' '=nothing 
-        {
+        {                         //         |
             I2C.SetI2CYesNo = 0;
             if (bByte == 'i') // it is just for convinience I2CReplyExpected can be set in any CMD
             {
@@ -3142,7 +3142,7 @@ DONE_WITH_FLASH:
                 I2C.RetransComI2CSet = 0;
                 I2C.RetransI2CCom = 0;
             }
-            else if (bByte == 'C')
+            else if (bByte == 'C') //<unit>=xcC = I2C->com ' '=nothing
             {
                 I2C.RetransI2CCom = 1;
                 I2C.RetransI2CComSet = 0;
@@ -3157,11 +3157,11 @@ DONE_WITH_FLASH:
             Main.DoneWithCMD = 1; // long command =XCI done
         }
         else if (bByte == '=') // <unit>=XCI<unit> from unit = X, CMD to send =C (space = no CMD) I = expect retransmit over I2C
-        {                      //  =5CC == to unit=5 with CMD=C over Type=C (Com) (operation SET)
-                               //  =5CI == to unit=5 with CMD=C over Type=I (I2C) (opeartion SET) equivalent of <5C<DATA>@ 
-                               //  =* == to unit=5 with CMD=C over I2C == starting next byte all stream goes from com to I2C (retransmit)
-                               //  =* == to unit=5 with CMD=C over Com == starting next byte all stream goes from I2C to com (retransmit)
-                               //  =<NBIT+LEN> (LEN < 128) next LEN bytes will goes to previously set device
+        {                      //  '=5CC' == to unit=5 with CMD=C over Type=C (Com) (operation SET)
+                               //  '=5CI' == to unit=5 with CMD=C over Type=I (I2C) (opeartion SET) equivalent of <5C<DATA>@ 
+                               //  '=*'   == to unit=5 with CMD=C over I2C == starting next byte all stream goes from com to I2C (retransmit)
+                               //  '=*'   == to unit=5 with CMD=C over Com == starting next byte all stream goes from I2C to com (retransmit)
+                               //  '=<NBIT+LEN>' (LEN < 128) next LEN bytes will goes to previously set device
                                //  high bit has to be set
             Main.DoneWithCMD = 0; // long command
             Main.SetFromAddr = 1;
@@ -3196,15 +3196,16 @@ DONE_WITH_FLASH:
         else if (bByte == 'F') // manipulation with FLASH memory: read/write/erase/any flash command
         {
             Main.DoneWithCMD = 0; // long command
-            DataB3.FlashWrite = 1;
-            DataB3.FlashWriteLen = 1;
+            DataB3.FlashCmd = 1;
+            DataB3.FlashCmdLen = 1;
             // send something to FLASH
             // F<length-of-packet><CMD><data>
             // send and receive responce from FLASH
             // F<length-of-packet><CMD><data>@<length-to-read>
             // in last case <length-of-packet> must include simbol '@'
-            // F\x01\x06              == write enable (flash command 06)
-            // F\x05\x03\x00\x12\x34@\x04 == read 4 bytes from a address 0x001234
+            // F\x01\x06              == write enable (flash command 06) -> send 0x06
+            // F\x01\0xc7             == erase all flash                 -> send =0xc7
+            // F\x05\x03\x00\x12\x34@\x04 == read 4 bytes from a address 0x001234  -> send 0x03 0x00 0x12 0x34 <- read 4 bytes (must not to cross boundary)
             // F\x01\x06F\x0c\x02\x00\x11\x22\x00\x00\x00\x00\x00\x00\x00\x00 == write 8 bytes to address 0x001122
             // F\x01\x06F\x04\x20\x00\x04\x00 == erase sector (4K) starting from address 0x000400
         }
@@ -3326,8 +3327,8 @@ void Reset_device(void)
 //                                                       PIC24HJ128GP504
 // I2C SDA            SDA1/RP9(1)/CN21/PMD3/RB9 |pin1              pin44| SCL1/RP8(1)/CN22/PMD4/RB8           I2C SCL
 //                        RP22(1)/CN18/PMA1/RC6 |pin2              pin43| INT0/RP7(1)/CN23/PMD5/RB7           COM2 =>
-//                        RP23(1)/CN17/PMA0/RC7 |pin3              pin42| PGEC3/ASCL1/RP6(1)/CN24/PMD6/RB6 <= COM1 RX
-//                        RP23(1)/CN17/PMA0/RC7 |pin4              pin41| PGED3/ASDA1/RP5(1)/CN27/PMD7/RB5    COM1 TX =>
+//                        RP23(1)/CN17/PMA0/RC7 |pin3              pin42| PGEC3/ASCL1/RP6(1)/CN24/PMD6/RB6    COM1 TX =>
+//                        RP23(1)/CN17/PMA0/RC7 |pin4              pin41| PGED3/ASDA1/RP5(1)/CN27/PMD7/RB5    COM1 RX <=
 //                        RP25(1)/CN19/PMA6/RC9 |pin5              pin40| VDD                   3.3
 // GND                                      VSS |pin6              pin39| VSS                   GND
 // capasitor                            VCAP(2) |pin7              pin38| RP21(1)/CN26/PMA3/RC5 ON/OFF power GPS
@@ -3391,9 +3392,9 @@ void Reset_device(void)
     //IN_FN_PPS_INT2 = IN_PIN_PPS_RP11;
 
     // com1 == serial loop btw devices
-    // PR5 - Serial RX  Pin 14
+    // PR5 - Serial RX  Pin 41
     IN_FN_PPS_U1RX = IN_PIN_PPS_RP5;
-	// RR6 - Serial TX  Pin 15
+	// RR6 - Serial TX  Pin 42
     OUT_PIN_PPS_RP6 = OUT_FN_PPS_U1TX;
 
     // com2 == serial loop from (a) backup (b) GPS (c) camera (d) memory
