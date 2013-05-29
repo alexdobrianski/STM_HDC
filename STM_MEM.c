@@ -83,6 +83,8 @@ see www.adobri.com for communication protocol spec
 // use serial 2 port
 #define USE_COM2 1
 
+// will be responce on command "=<unit><cmd>"
+#define RESPONCE_ON_EQ
 
 #ifdef _PIC16F88
 #include "int16CXX.H"
@@ -159,17 +161,21 @@ see www.adobri.com for communication protocol spec
 #define COM_to_GPS     bclr(PORTBbits,RB13); bclr(PORTBbits,RB11);
 
 // SSCLOCK RA0(pin2), SSDATA_IN RA1(pin3), SSDATA_OUT RA2(pin9), SSCS RA3(pin10)
-//#define SSPORT  LATAbits
-//#define SSCLOCK LATA0
-//#define SSDATA_IN LATA1
-//#define SSDATA_OUT LATA2
-//#define SSCS       LATA3
+#define SSPORT  LATAbits
+#define SSCLOCK LATA0
+#define SSDATA_IN LATA1
+#define SSDATA_OUT LATA2
+#define SSCS       LATA3
 
-#define SSPORT  PORTAbits
-#define SSCLOCK RA0
-#define SSDATA_IN RA1
-#define SSDATA_OUT RA2
-#define SSCS       RA3
+#define SSPORT_READ  PORTAbits
+#define SSDATA_OUT_READ RA2
+
+
+//#define SSPORT  PORTAbits
+//#define SSCLOCK RA0
+//#define SSDATA_IN RA1
+//#define SSDATA_OUT RA2
+//#define SSCS       RA3
 
 #else
 // SSCLOCK RA7(pin9), SSDATA_IN RA6(pin10), SSDATA_OUT RA4(pin6), SSCS RA3(pin5)
@@ -195,8 +201,11 @@ unsigned FlashRead:1;
 } DataB3;
 unsigned char CountWrite;
 
+unsigned int Bytes2CopyFromCom2;
 #pragma rambank RAM_BANK_1
-
+struct _Set{
+unsigned DoCopyFromCom2:1;
+} Set;
 
 //#include "commc1.h"
 ///////////////////////////////////////////////////////////////////////
@@ -816,7 +825,9 @@ RC_ERROR:
 #endif
 RC_24_ERROR:
                Main.getCMD = 0;
+#ifdef USE_OLD_CMD_EQ
                I2C.RetransComI2C = 0;
+#endif
                //Main.PrepI2C = 0;
                continue; // can be another bytes
 NO_RC_ERROR:
@@ -1825,6 +1836,11 @@ unsigned char getchI2C(void);
 void putch(unsigned char simbol);
 void putchWithESC(unsigned char simbol);
 unsigned char getch(void);
+#ifdef SSPORT
+void SendSSByte(unsigned char bByte);
+unsigned char GetSSByte(void);
+void SendSSByteFAST(unsigned char bByte); // for a values <= 3
+#endif
 
 void main()
 {
@@ -1950,6 +1966,16 @@ void main()
     RBIF = 0;
 #endif
     ShowMessage();
+//            CS_LOW;                 // open FLASH memory
+//            SendSSByte(0x03);       // "read FLASH memory"
+//            SendSSByte(0);       // address second byte
+//            SendSSByte(0);       // address third byte
+//            SendSSByte(0);       // address third byte
+//            bWork = GetSSByte();
+//            CS_HIGH;                 // close FLASH memory
+
+    Bytes2CopyFromCom2 = 0;
+
     //bitset(PORTA,3);
     //bitset(SSPCON,4);  // set clock high;
 //#include "commc7.h"
@@ -2007,6 +2033,7 @@ void main()
             continue;
         if (AInI2CQu.iQueueSize) // if something comes from I2C (slave received or some I2c device responded on read command)
         {
+#ifdef USE_OLD_CMD_EQ
             if (RetransmitLen) // from I2C comes command =<LEN> - needs to retransmit everything to previously set device
             {                  //                          (set done by =5CC)
                 if (!I2C.RetransComI2CSet)
@@ -2032,6 +2059,7 @@ REPEAT_OP1:
                     goto REPEAT_OP1;
                 continue;
             }
+#endif
             if (CallBkI2C())// 0 = do not process byte; 1 = process;
             {
                 bitclr(bWork,0);
@@ -2169,6 +2197,7 @@ NO_PROCESS_IN_CMD:;
 #define SPBRG_38400_16MHZ 25
 #define SPBRG_38400_32MHZ 51
 #define SPBRG_38400_64MHZ 103
+#define SPBRG_38400_40MIPS 296
 
 #define SPBRG_38400 12
 
@@ -2320,6 +2349,14 @@ void PutsCom2(const char * s)
 		putchCom2(*s);
 		s++;
 	}
+}
+unsigned char getchCom2(void)
+{
+    unsigned char bRet = AInQuCom2.Queue[AInQuCom2.iExit];
+    if (++AInQuCom2.iExit >= BUFFER_LEN)
+        AInQuCom2.iExit = 0;
+    AInQuCom2.iQueueSize --;
+    return bRet;
 }
 
 
@@ -2934,6 +2971,7 @@ PUT_CHAR:
             if (AOutI2CQu.iQueueSize < 14) // packet can be long
                 return;
 END_I2C_MSG_WAIT:              // TBD this loop has to have limitation - bus can be dead
+#ifdef USE_OLD_CMD_EQ
             if (I2C.NextI2CRead) // something expected ?
             {
                 if (I2C.RetransI2CCom)
@@ -2942,6 +2980,7 @@ END_I2C_MSG_WAIT:              // TBD this loop has to have limitation - bus can
                     InsertI2C(LenI2CRead | 0x80);
                 }
             }
+#endif
 #ifdef I2C_INT_SUPPORT ////////////////////////////////////////////////////////
             InitI2cMaster();
 WAIT_I2C_DONE:
@@ -3016,15 +3055,15 @@ DONE_DONE_I2C:
                 if (DataB3.FlashRead)
                 {
                     DataB3.FlashRead = 0;
-                    if (!Main.ComNotI2C)
-                    {
-                        //do 
-                        //{
-                        //    InsertI2C(GetSSByte()); // read byte from FLASh will goes to I2C < 10 bytes
-                        //} while(--bByte);
-                        //InsertI2C('@');
-                    }
-                    else
+                    //if (!Main.ComNotI2C)
+                    //{
+                    //    //do 
+                    //    //{
+                    //    //    InsertI2C(GetSSByte()); // read byte from FLASh will goes to I2C < 10 bytes
+                    //    //} while(--bByte);
+                    //    //InsertI2C('@');
+                    //}
+                    //else
                     {
                         Main.SendWithEsc = 1;
                         do 
@@ -3043,14 +3082,14 @@ DONE_DONE_I2C:
                     if (bByte == '@') // without CS_HIGH will be next read
                     {
                         DataB3.FlashRead = 1;
-                        if (!Main.ComNotI2C) // CMD comes from I2C - reply from read should goes back to I2C
-                        {
-                            //InsertI2C('<');
-                            //InsertI2C(UnitFrom);
-                            //if (SendCMD)
-                            //    InsertI2C(SendCMD);
-                        }
-                        else     // CMD comes from Com == relay (read) must go back to comm
+                        //if (!Main.ComNotI2C) // CMD comes from I2C - reply from read should goes back to I2C
+                        //{
+                        //    //InsertI2C('<');
+                        //    //InsertI2C(UnitFrom);
+                        //    //if (SendCMD)
+                        //    //    InsertI2C(SendCMD);
+                        //}
+                        //else     // CMD comes from Com == relay (read) must go back to comm
                         {
                             if (UnitFrom)
                             {
@@ -3089,10 +3128,20 @@ DONE_WITH_FLASH:
 /////////////////////////////////////////////////////////////////////////
 // end COPY 3
 ////////////////////////////////////////////////////////////////////////
-
        
 // additional code:
-
+        if (Set.DoCopyFromCom2)
+        {
+             Set.DoCopyFromCom2 = 0;
+             Bytes2CopyFromCom2 = bByte;
+             if (UnitFrom)
+             {
+                 putch(UnitFrom);
+                 if (SendCMD)
+                    putch(SendCMD);
+             }
+             return;
+        }
 //#include "commc4.h"
 ////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////
@@ -3100,7 +3149,7 @@ DONE_WITH_FLASH:
 // begin COPY 4
 ///////////////////////////////////////////////////////////////////////   
 
-        if (Main.SetFromAddr) //<unit>=Xci<unit> 
+        if (Main.SetFromAddr) //<unit>=Xc            //<unit>=Xci<unit> 
         {                     //       |         if ' ' than responce unit is not set
             if (bByte == ' ')
                 bByte = 0;
@@ -3120,15 +3169,27 @@ DONE_WITH_FLASH:
             Main.SetSendCMD = 1;
             return;
         }
-        else if (Main.SetSendCMD) //<unit>=xCi<unit> 
+        else if (Main.SetSendCMD) //<unit>=xC                 ///<unit>=xCi<unit> 
         {                         //        |        if ' ' than SendCMD is not set
             if (bByte == ' ')
                 bByte = 0;
             SendCMD = bByte;
             Main.SetSendCMD = 0;
             I2C.SetI2CYesNo = 1;
+#ifdef RESPONCE_ON_EQ
+			if (UnitFrom) // basicall that is ACK
+            {
+            	putch(UnitFrom);
+                if (SendCMD)
+                	putch(SendCMD);
+                putch('~');
+                putch(UnitFrom);
+            }
+#endif
+            Main.DoneWithCMD = 1; // long command "=XC" done
             return;
         }
+#ifdef USE_OLD_CMD_EQ
         else if (I2C.SetI2CYesNo) //<unit>=xcI<unit> I= com->I2C C = I2C->com ' '=nothing 
         {                         //         |
             I2C.SetI2CYesNo = 0;
@@ -3156,7 +3217,10 @@ DONE_WITH_FLASH:
             }
             Main.DoneWithCMD = 1; // long command =XCI done
         }
-        else if (bByte == '=') // <unit>=XCI<unit> from unit = X, CMD to send =C (space = no CMD) I = expect retransmit over I2C
+#endif
+        else if (bByte == '=') // new version "=XC" where X - unit to responce and C - one byte command to responce 
+                               // old verion
+                               // <unit>=XCI<unit> from unit = X, CMD to send =C (space = no CMD) I = expect retransmit over I2C
         {                      //  '=5CC' == to unit=5 with CMD=C over Type=C (Com) (operation SET)
                                //  '=5CI' == to unit=5 with CMD=C over Type=I (I2C) (opeartion SET) equivalent of <5C<DATA>@ 
                                //  '=*'   == to unit=5 with CMD=C over I2C == starting next byte all stream goes from com to I2C (retransmit)
@@ -3165,9 +3229,11 @@ DONE_WITH_FLASH:
                                //  high bit has to be set
             Main.DoneWithCMD = 0; // long command
             Main.SetFromAddr = 1;
+#ifdef USE_OLD_CMD_EQ
             I2C.RetransComI2C = 0;
             I2C.RetransComI2CSet = 0;
-            I2C.RetransI2CCom = 0;
+            I2C.RetransI2CCom = 0;            
+#endif
         }
         // processing CMD
         else if (bByte == '~') // reseved test message from itself
@@ -3217,8 +3283,54 @@ DONE_WITH_FLASH:
 ////////////////////////////////////////////////////////////////////////
 
 // additional code:
-        //else if (bByte == 'F') // set file name
-        
+        else if (bByte == 'G') // set turn on power on GPS reciver
+        {
+            GPS_On;
+        }
+        else if (bByte == 'g') // set turn off power on GPS reciver
+        {
+            GPS_Off; 
+        }
+        else if (bByte == 'a') // switch com2 to GPS reciver
+        {
+            // default boud rate 38400
+            COM_to_GPS;
+        }
+        else if (bByte == 'b') // switch com2 to backup communication
+        {
+            // speed??
+            COM_to_backup;
+        }
+        else if (bByte == 'c') // switch com2 to FALSH memory
+        {
+            // speed??
+            COM_to_MEM;
+        }
+        else if (bByte == 'd') // switch com2 to Camera
+        {
+            COM_to_Camera;
+            // Default baud rate of serial port is 38400
+        }
+        else if (bByte == 'e') // debug command == copy N bytes from com2 -> com1
+        {
+            if (Bytes2CopyFromCom2)
+            {
+                Bytes2CopyFromCom2 = 0;
+                if (UnitFrom)
+                     putch(UnitFrom);
+             }
+            else
+            {
+			    Main.DoneWithCMD = 0; // long command
+                Set.DoCopyFromCom2 = 1;
+            }
+        }
+
+//#define COM_to_Camera  bset(PORTBbits,RB12); bset(PORTBbits,RB11);
+//#define COM_to_MEM     bclr(PORTBbits,RB12); bset(PORTBbits,RB11);
+//#define COM_to_backup  bset(PORTBbits,RB13); bclr(PORTBbits,RB11);
+//#define COM_to_GPS     bclr(PORTBbits,RB13); bclr(PORTBbits,RB11);
+
 SKIP_BYTE:;
     } // do not confuse: this is a else from Main.getCMD == 1
 }
@@ -3246,6 +3358,18 @@ unsigned char CallBkMain(void) // 0 = do continue; 1 = process queues
     //    else
     //        return 0;
     //}
+    if (Bytes2CopyFromCom2)  // debug request to copy from COM2 -> COM1
+    {
+		if (AInQuCom2.iQueueSize)  // something in COM2
+        {
+            putchWithESC(getchCom2());
+            if (--Bytes2CopyFromCom2 == 0)
+            {
+                 if (UnitFrom)
+                     putch(UnitFrom);
+            }
+        }
+    }
     return 1;
 }
 #pragma codepage 1
@@ -3938,12 +4062,12 @@ void SendSSByte(unsigned char bByte)
 #ifdef __PIC24H__
         // nobody uses portA ??? make sure!!!
         // otherwise it must be 3 commands instead of one:
-        // bclr(SSPORT,SSCLOCK);
-        // nop();
-        // bclr(SSPORT,SSDATA_IN);
+         bclr(SSPORT,SSCLOCK);
+         nop();
+         bclr(SSPORT,SSDATA_IN);
 
         // SSCLOCK RA0(pin2), SSDATA_IN RA1(pin3), SSDATA_OUT RA2(pin9), SSCS RA3(pin10)
-        PORTA = 0b00000000;
+        //PORTA = 0b00000000;
 #else
         bclr(SSPORT,SSCLOCK);
         bclr(SSPORT,SSDATA_IN);
@@ -4054,6 +4178,10 @@ void SendSSByteFAST(unsigned char bByte)
     bclr(SSPORT,SSCLOCK);  // 23 commands
 #endif
 }
+#ifndef SSPORT_READ
+#define SSPORT_READ  SSPORT
+#define SSDATA_OUT_READ SSDATA_OUT
+#endif
 
 unsigned char GetSSByte(void)
 {
@@ -4069,7 +4197,7 @@ unsigned char GetSSByte(void)
         bset(SSPORT,SSCLOCK);
         //nop();
         //bitclr(bWork2,0); // bWork2 is unsigned == zero in low bit garanteed check assembler code to confirm
-        if (btest(SSPORT,SSDATA_OUT))
+        if (btest(SSPORT_READ,SSDATA_OUT_READ))
             bitset(bWork2,0);
         bclr(SSPORT,SSCLOCK);
     }
