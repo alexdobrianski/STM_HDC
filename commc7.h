@@ -191,8 +191,16 @@ NO_PROCESS_IN_CMD:;
         }
         else  // nothing in both queue can sleep till interrupt
         {
+            if (AInI2CQu.iQueueSize == 0)
+            {
+                //if (I2C_B1.I2CMasterDone) // no communication over I2C
+#ifdef __PIC24H__
+                CLKDIVbits.DOZEN = 1; // switch clock from 40MOP=>1.25MOP
+#else
+#endif
+            }
         }
-    }
+   }
 ///////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////

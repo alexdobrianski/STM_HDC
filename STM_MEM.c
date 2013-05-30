@@ -2172,8 +2172,16 @@ NO_PROCESS_IN_CMD:;
         }
         else  // nothing in both queue can sleep till interrupt
         {
+            if (AInI2CQu.iQueueSize == 0)
+            {
+                //if (I2C_B1.I2CMasterDone) // no communication over I2C
+#ifdef __PIC24H__
+                CLKDIVbits.DOZEN = 1; // switch clock from 40MOP=>1.25MOP
+#else
+#endif
+            }
         }
-    }
+   }
 ///////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////
@@ -3291,6 +3299,14 @@ DONE_WITH_FLASH:
         {
             GPS_Off; 
         }
+        else if (bByte == 'M') // set turn on power on GPS reciver
+        {
+            FLASH_DISK_to_MEM;
+        }
+        else if (bByte == 'm') // set turn off power on GPS reciver
+        {
+            FLASH_DISK_to_HD_camera; 
+        }
         else if (bByte == 'a') // switch com2 to GPS reciver
         {
             // default boud rate 38400
@@ -3389,6 +3405,7 @@ void Reset_device(void)
     // Configure Oscillator to operate the device at 40Mhz
     // Fosc= Fin*M/(N1*N2), Fcy=Fosc/2
     // Fosc= 8M*40/(2*2)=80Mhz for 8M input clock
+	//PLLFBD=2;
 	PLLFBD=42; // 42// M=40
            // for value = 50 it can be 92.125MHz and 46MIPS needs to make shure that FIN will be more then 4MHz and less 8MHz
            // OCTUN set more then 8MHz can be wrong
@@ -3445,7 +3462,7 @@ void Reset_device(void)
     //    bit 11 DOZEN: DOZE Mode Enable bit(1)
     //         1 = The DOZE<2:0> bits specify the ratio between the peripheral clocks and the processor clocks
     //         0 = Processor clock/peripheral clock ratio forced to 1:1
-    CLKDIVbits.DOZE = 0b101 ; // speed of a processor is 40MOP => DOZE = 1.25 MOP (like 88)
+    CLKDIVbits.DOZE = 0b111 ; // speed of a processor is 40MOP => DOZE = 0.312 MOP (like IBM 360)
     CLKDIVbits.ROI = 1;
 
 //                                                       PIC24HJ128GP504
