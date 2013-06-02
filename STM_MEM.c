@@ -155,10 +155,22 @@ see www.adobri.com for communication protocol spec
 #define GPS_On                  bset(PORTCbits,RC5); 
 #define GPS_Off                 bclr(PORTCbits,RC5); 
 
-#define COM_to_Camera  bset(PORTBbits,RB12); bset(PORTBbits,RB11);
-#define COM_to_MEM     bclr(PORTBbits,RB12); bset(PORTBbits,RB11);
-#define COM_to_backup  bset(PORTBbits,RB13); bclr(PORTBbits,RB11);
-#define COM_to_GPS     bclr(PORTBbits,RB13); bclr(PORTBbits,RB11);
+//a
+//b
+//c
+//d
+
+#define COM_to_Camera  LATBbits.LATB11 =0; LATBbits.LATB12 =0; LATBbits.LATB13 = 0;
+#define COM_to_MEM     LATBbits.LATB11 =0; LATBbits.LATB12 =0; LATBbits.LATB13 = 1;
+#define COM_to_backup  LATBbits.LATB11 =0; LATBbits.LATB12 =1; LATBbits.LATB13 = 0;
+#define COM_to_GPS     LATBbits.LATB11 =1; LATBbits.LATB12 =1; LATBbits.LATB13 = 0;
+
+//1 c gps
+//2 c 
+//3 b mem 
+//4 a cam 0 0 0
+
+
 
 // SSCLOCK RA0(pin2), SSDATA_IN RA1(pin3), SSDATA_OUT RA2(pin9), SSCS RA3(pin10)
 #define SSPORT  LATAbits
@@ -1966,6 +1978,10 @@ void main()
     RBIF = 0;
 #endif
     ShowMessage();
+// for debug:
+            COM_to_GPS;
+            GPS_On;
+
 //            CS_LOW;                 // open FLASH memory
 //            SendSSByte(0x03);       // "read FLASH memory"
 //            SendSSByte(0);       // address second byte
@@ -2192,14 +2208,18 @@ NO_PROCESS_IN_CMD:;
 
 } // at the end will be Sleep which then continue to main
 
+#define SPBRG_4800_40MIPS 2064
 
 #define SPBRG_9600 51
+#define SPBRG_9600_40MIPS 1032
+
 #define SPBRG_19200 25
 
 #define SPBRG_19200_8MHZ 25
 #define SPBRG_19200_16MHZ 51
 #define SPBRG_19200_32MHZ 103
 #define SPBRG_19200_64MHZ 207
+#define SPBRG_19200_40MIPS 516
 
 #define SPBRG_38400_8MHZ 13
 #define SPBRG_38400_16MHZ 25
@@ -2220,7 +2240,7 @@ NO_PROCESS_IN_CMD:;
 #define SPBRG_115200_64MHZ 34
 #define SPBRG_115200_40MIPS 85
 #define SPBRG_SPEED     SPBRG_57600_40MIPS
-#define SPBRG_SPEEDCOM2 SPBRG_57600_40MIPS
+#define SPBRG_SPEEDCOM2 SPBRG_9600_40MIPS
 
 
 //#include "commc2.h"
@@ -3290,6 +3310,7 @@ DONE_WITH_FLASH:
 // end COPY 4
 ////////////////////////////////////////////////////////////////////////
 
+
 // additional code:
         else if (bByte == 'G') // set turn on power on GPS reciver
         {
@@ -3386,6 +3407,8 @@ unsigned char CallBkMain(void) // 0 = do continue; 1 = process queues
             }
         }
     }
+    //else
+    //    putch(getchCom2());
     return 1;
 }
 #pragma codepage 1
@@ -3467,7 +3490,7 @@ void Reset_device(void)
 
 //                                                       PIC24HJ128GP504
 // I2C SDA            SDA1/RP9(1)/CN21/PMD3/RB9 |pin1              pin44| SCL1/RP8(1)/CN22/PMD4/RB8           I2C SCL
-//                        RP22(1)/CN18/PMA1/RC6 |pin2              pin43| INT0/RP7(1)/CN23/PMD5/RB7           COM2 =>
+//                        RP22(1)/CN18/PMA1/RC6 |pin2              pin43| INT0/RP7(1)/CN23/PMD5/RB7           COM2 => TX
 //                        RP23(1)/CN17/PMA0/RC7 |pin3              pin42| PGEC3/ASCL1/RP6(1)/CN24/PMD6/RB6    COM1 TX =>
 //                        RP23(1)/CN17/PMA0/RC7 |pin4              pin41| PGED3/ASDA1/RP5(1)/CN27/PMD7/RB5    COM1 RX <=
 //                        RP25(1)/CN19/PMA6/RC9 |pin5              pin40| VDD                   3.3
@@ -3539,10 +3562,10 @@ void Reset_device(void)
     OUT_PIN_PPS_RP6 = OUT_FN_PPS_U1TX;
 
     // com2 == serial loop from (a) backup (b) GPS (c) camera (d) memory
-    // PR7 - Serial2 RX  Pin 43
-    IN_FN_PPS_U2RX = IN_PIN_PPS_RP7;
-	// RR10 - Serial2 TX  Pin 8
-    OUT_PIN_PPS_RP10 = OUT_FN_PPS_U2TX;
+    // PR7 - Serial2 TX  Pin 43
+    OUT_PIN_PPS_RP7 = OUT_FN_PPS_U2TX; 
+    // RR10 - Serial2 RX  Pin 8
+    IN_FN_PPS_U2RX = IN_PIN_PPS_RP10;
 
     // I2C:
     // SCL1 = I2C clock Pin 17 (this is NOT alernative I2c set as FPOR = 1 in configuration) 
@@ -3556,7 +3579,7 @@ void Reset_device(void)
 
     __builtin_write_OSCCONL(OSCCON | 0x40); //lock back port remapping
 
-    TRISBbits.TRISB11=1;
+    //TRISBbits.TRISB11=1;
      RtccInitClock();       //turn on clock source
      RtccWrOn();            //enable RTCC peripheral
      //RtccWriteTimeDate(&RtccTimeDate,TRUE);
