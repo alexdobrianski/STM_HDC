@@ -219,6 +219,10 @@ struct _Set{
 unsigned DoCopyFromCom2:1;
 } Set;
 
+
+unsigned char TMR1YEAR;
+
+
 //#include "commc1.h"
 ///////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////
@@ -2211,7 +2215,7 @@ NO_PROCESS_IN_CMD:;
 #define SPBRG_4800_40MIPS 2064
 
 #define SPBRG_9600 51
-#define SPBRG_9600_40MIPS 1032
+#define SPBRG_9600_40MIPS 1040
 
 #define SPBRG_19200 25
 
@@ -2219,13 +2223,13 @@ NO_PROCESS_IN_CMD:;
 #define SPBRG_19200_16MHZ 51
 #define SPBRG_19200_32MHZ 103
 #define SPBRG_19200_64MHZ 207
-#define SPBRG_19200_40MIPS 516
+#define SPBRG_19200_40MIPS 519
 
 #define SPBRG_38400_8MHZ 13
 #define SPBRG_38400_16MHZ 25
 #define SPBRG_38400_32MHZ 51
 #define SPBRG_38400_64MHZ 103
-#define SPBRG_38400_40MIPS 296
+#define SPBRG_38400_40MIPS 259
 
 #define SPBRG_38400 12
 
@@ -2874,7 +2878,6 @@ void ReleseI2cMaster(void)
 //////////////////////////////////////////////////////////////////////
 
 // additional code:
-
 void ProcessCMD(unsigned char bByte)
 {
     unsigned char bWork;
@@ -3158,7 +3161,7 @@ DONE_WITH_FLASH:
 ////////////////////////////////////////////////////////////////////////
        
 // additional code:
-        if (Set.DoCopyFromCom2)
+        if (Set.DoCopyFromCom2)  // end of the command e<XX> = send <XX> bytes from COM2 to COM1
         {
              Set.DoCopyFromCom2 = 0;
              Bytes2CopyFromCom2 = bByte;
@@ -3170,6 +3173,27 @@ DONE_WITH_FLASH:
              }
              return;
         }
+    	if (TMR1YEAR < 13)  // time set command (can be executed by anybody - but probaly by ground station hub
+    	{                   // tXSMHDMY 
+        	switch(++TMR1YEAR)
+        	{
+        		case 2:/*setTMR130 = bByte;*/break;
+        		case 3:RtccTimeDate.f.sec = bByte;break; // 0x00-0x59
+        		case 4:RtccTimeDate.f.min = bByte;break; // 0x00-0x59
+        		case 5:RtccTimeDate.f.hour = bByte;break;// 0x00-0x23
+        		case 6:RtccTimeDate.f.mday = bByte;break;// 0x01-0x31
+        		case 7:RtccTimeDate.f.mon = bByte;break; // 0x01-0x12
+        		case 8:RtccTimeDate.f.year = bByte;      // 0x13-0xXX
+            		TMR1YEAR = 13;
+            		RtccWriteTimeDate(&RtccTimeDate,TRUE);
+            		//TMR1ON = 0;
+            		Main.DoneWithCMD = 1; // long command axxyyzz done
+            		//EnableTMR1();
+	            break;
+    	    }
+        	return;
+    	}
+
 //#include "commc4.h"
 ////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////
@@ -3362,6 +3386,31 @@ DONE_WITH_FLASH:
                 Set.DoCopyFromCom2 = 1;
             }
         }
+        else if (bByte == 't') // set time: command tXSMHDMY 
+        {
+            Main.DoneWithCMD = 0; // long command
+            TMR1YEAR = 1; // year bigger then 2012 : any value smaller then 12 mean seting time
+
+        }
+        else if (bByte == 'T') // get the time: responce command tXSMHDMY 
+        {
+            Main.DoneWithCMD = 1; // command len 1
+            TMR1YEAR = 1; // year bigger then 2013 : any value smaller then 13 mean seting time
+           	if (UnitFrom)
+               putch(UnitFrom);
+            RtccReadTimeDate(&RtccTimeDateVal);
+            putch(0x00);
+            putchWithESC(RtccTimeDateVal.f.sec);
+            putchWithESC(RtccTimeDateVal.f.min);
+            putchWithESC(RtccTimeDateVal.f.hour);
+            putchWithESC(RtccTimeDateVal.f.mday);
+            putchWithESC(RtccTimeDateVal.f.mon);
+            putchWithESC(RtccTimeDateVal.f.year);
+            if (UnitFrom)
+               putch(UnitFrom);
+        }
+
+
 
 //#define COM_to_Camera  bset(PORTBbits,RB12); bset(PORTBbits,RB11);
 //#define COM_to_MEM     bclr(PORTBbits,RB12); bset(PORTBbits,RB11);
@@ -3594,8 +3643,8 @@ void Reset_device(void)
          (RtccTimeDateVal.f.hour>0x24) ||
          ((RtccTimeDateVal.f.hour & 0x0f)>0x9) )
      {
-         RtccTimeDateVal.f.mday = 0x09;RtccTimeDateVal.f.mon=0x11;
-         RtccTimeDateVal.f.year=0x12;
+         RtccTimeDateVal.f.mday = 0x13;RtccTimeDateVal.f.mon=0x03;
+         RtccTimeDateVal.f.year=0x13;
          RtccTimeDateVal.f.hour = 0x10;RtccTimeDateVal.f.min = 0x01;
          RtccTimeDateVal.f.sec = 0x01;RtccTimeDateVal.f.wday = 0x05;
          //mRtccOff();
@@ -3786,7 +3835,7 @@ void enable_uart(void)//bit want_ints)
     U2MODE = 0b000100010011000;
 #else
     U2MODE = 0b000100010001000;
-#endif
+#endif                             
              //0                // bit 15 UARTEN: UARTx Enable bit(1)
                                 //         1 = UARTx is enabled; all UARTx pins are controlled by UARTx as defined by UEN<1:0>
                                 //         0 = UARTx is disabled; all UARTx pins are controlled by port latches; UARTx power consumption minimal
@@ -3834,10 +3883,15 @@ void enable_uart(void)//bit want_ints)
     //   boud rate formula: BRGH = 0
     // BoudRate = Fcy/ (16 * (UxBRG + 1))
     //                      BRGH = 1
-    // BoudRate = Fcy/ (4 * (UxBRG + 1)
+    // BoudRate = Fcy/ (4 * (UxBRG + 1))
+    // (4 * (UxBRG + 1)) = Fcy/BoudRate
+    // (UxBRG + 1) = Fcy/(4*BoudRate)
+    // UxBRG = Fcy/(4*BoudRate) - 1;
+    // 
     // for example on Fcy = 10.13375 MHz = 10133750 and U2BRG = 263 BoudRate = 9596
     // #define SPBRG_9600_10MIPS 262
     // #define SPBRG_57600_10MIPS 43
+//    
 
     U2STAbits.UTXBRK = 0;
     U2STAbits.UTXISEL1 = 0;     // 11 = Reserved
