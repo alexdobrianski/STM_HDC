@@ -847,7 +847,7 @@ RC_24_ERROR:
                //Main.PrepI2C = 0;
                continue; // can be another bytes
 NO_RC_ERROR:
-               if (RetrUnit) // relay data over unit during processing commands streaming from I2C
+               if (RetrUnit) // relay data to next unit during processing streaming == stream to another unit retransmit directly without entering queue
                {
                    if (Main.prepStream)
                    {
@@ -863,7 +863,10 @@ NO_RC_ERROR:
                            Main.prepZeroLen = 0;
                            Main.prepSkip = 1;
 RELAY_SYMB:
-                           // exact copy from putchar == shit it is big!!! but it can be called recursivly!!
+                           // exact copy from putchar == it is big!!! but it can be called recursivly!!
+                           ///////////////////////////////////////////////////////////////////////////////////////
+                           // direct output to com1
+                           ///////////////////////////////////////////////////////////////////////////////////////
                            if (AOutQu.iQueueSize == 0)  // if this is a com and queue is empty then needs to directly send byte(s) 
                            {                            // on 16LH88,16F884,18F2321 = two bytes on pic24 = 4 bytes
                                // at that point Uart interrupt is disabled
@@ -909,6 +912,9 @@ SEND_BYTE_TO_QU:
                                } 
                            }
                            goto END_INPUT_COM;
+                           /////////////////////////////////////////////////////////////////////////////////////////////
+                           //   end of direct output to com1
+                           /////////////////////////////////////////////////////////////////////////////////////////////
                        }
                        else if (work2 == RetrUnit) // relay done
                        {
@@ -3178,12 +3184,13 @@ DONE_WITH_FLASH:
         	switch(++TMR1YEAR)
         	{
         		case 2:/*setTMR130 = bByte;*/break;
-        		case 3:RtccTimeDate.f.sec = bByte;break; // 0x00-0x59
-        		case 4:RtccTimeDate.f.min = bByte;break; // 0x00-0x59
-        		case 5:RtccTimeDate.f.hour = bByte;break;// 0x00-0x23
-        		case 6:RtccTimeDate.f.mday = bByte;break;// 0x01-0x31
-        		case 7:RtccTimeDate.f.mon = bByte;break; // 0x01-0x12
-        		case 8:RtccTimeDate.f.year = bByte;      // 0x13-0xXX
+                case 3:/*setTMR130 = bByte;*/break;
+        		case 4:RtccTimeDate.f.sec = bByte;break; // 0x00-0x59
+        		case 5:RtccTimeDate.f.min = bByte;break; // 0x00-0x59
+        		case 6:RtccTimeDate.f.hour = bByte;break;// 0x00-0x23
+        		case 7:RtccTimeDate.f.mday = bByte;break;// 0x01-0x31
+        		case 8:RtccTimeDate.f.mon = bByte;break; // 0x01-0x12
+        		case 9:RtccTimeDate.f.year = bByte;      // 0x13-0xXX
             		TMR1YEAR = 13;
             		RtccWriteTimeDate(&RtccTimeDate,TRUE);
             		//TMR1ON = 0;
@@ -3386,7 +3393,7 @@ DONE_WITH_FLASH:
                 Set.DoCopyFromCom2 = 1;
             }
         }
-        else if (bByte == 't') // set time: command tXSMHDMY 
+        else if (bByte == 't') // set time: command tXXSMHDMY 
         {
             Main.DoneWithCMD = 0; // long command
             TMR1YEAR = 1; // year bigger then 2012 : any value smaller then 12 mean seting time
@@ -3395,10 +3402,10 @@ DONE_WITH_FLASH:
         else if (bByte == 'T') // get the time: responce command tXSMHDMY 
         {
             Main.DoneWithCMD = 1; // command len 1
-            TMR1YEAR = 1; // year bigger then 2013 : any value smaller then 13 mean seting time
            	if (UnitFrom)
                putch(UnitFrom);
             RtccReadTimeDate(&RtccTimeDateVal);
+            putch(0x00);
             putch(0x00);
             putchWithESC(RtccTimeDateVal.f.sec);
             putchWithESC(RtccTimeDateVal.f.min);
