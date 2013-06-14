@@ -188,6 +188,16 @@ see www.adobri.com for communication protocol spec
 #define SSPORT_READ  PORTAbits
 #define SSDATA_OUT_READ RA2
 
+// this is for Cubesat version - 3 FLASH memory processing
+#define SSDATA_OUT2 LATA10
+#define SSDATA_OUT3 LATA7
+
+// dower down implementation if standbay current too big 
+//  8MB W25Q80         READ= 8ma, wtite =12ma, erase all= 20ma, standby=25mka, powerdown= 1mka
+// 16MB M25P16-VMN6TP  read= 8ma, write =15ma                   standby=50mka, powerdown=10mka
+// 32MB SST25VF032B    read=10ma, write =20ma, erace all= 30ma, standby=20mka, powerdown=non
+// 64MB M25P64-VMF3TPB read= 8ma, write =20ma, erace all= 20ma, standby=50mka, powerdown=10mka
+//#define FLASH_POWER_DOWN 1
 
 //#define SSPORT  PORTAbits
 //#define SSCLOCK RA0
@@ -242,17 +252,17 @@ unsigned char TMR1YEAR;
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //                    mesaage receved over COM1 = on char '~' from GrStn needs to send first <Unit> then <~>
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
-struct _Tdelta(
-rtccTimeDate Rtcc;
+struct _Tdelta{
+rtccTimeDate RtccT;
 unsigned long Timer;
 } Tdelta;
 
-//struct _TBefore(   // that delta is zero
+//struct _TBefore{   // that delta is zero
 //rtccTimeDate Rtcc;
 //unsigned long Timer;
 //} TBefore;
 
-//struct _TUpload(   // that delta is zero
+//struct _TUpload{   // that delta is zero
 //rtccTimeDate Rtcc;
 //unsigned long Timer;
 //} TUpload;
@@ -260,8 +270,8 @@ unsigned long Timer;
 /////////////////////////////////////////////////////////////////////////////////////
 // after receving '~' from the loop on respond of '=X  ' clock+timer value stored
 ////////////////////////////////////////////////////////////////////////////////////  
-struct _TAfter(     
-rtccTimeDate Rtcc;
+struct _TAfter{     
+rtccTimeDate RtccT;
 unsigned long Timer;
 } TAfter;
 #else
@@ -286,7 +296,7 @@ unsigned int Timer;
 // for BT in mode ATDTEARTH on receving from Main Ctrl message '5....'
 // for BT in mode ATDTLUNA on receive packet ofer FQ1
 /////////////////////////////////////////////////////////////////////////////////////
-struct _TTUpload(
+struct _TTUpload{
 unsigned int Timer1;
 unsigned int Timer;
 } TTUpload;
@@ -294,7 +304,7 @@ unsigned int Timer;
 // for BT in mode ATDTEARTH on burst to send to Earth
 // for BT in mode ATDTLUNA on send packet to GrStn
 /////////////////////////////////////////////////////////////////////////////////////
-struct _TTAfter(
+struct _TTAfter{
 unsigned int Timer1;
 unsigned int Timer;
 } TTAfter;
@@ -3763,8 +3773,8 @@ void Reset_device(void)
 // <=SW1 COM2       AN12/RP12(1)/CN14/PMD0/RB12 |pin10             pin35| TDI/PMA9/RA9          HD Camera click1   
 // <=SW2 COM2       AN11/RP13(1)/CN13/PMRD/RB13 |pin11             pin34| SOSCO/T1CK/CN0/RA4    32.kHz quartz
 
-//                               TMS/PMA10/RA10 |pin12             pin33| SOSCI/RP4(1)/CN1/RB4  32.kHz quartz
-//                                 TCK/PMA7/RA7 |pin13             pin32| TDO/PMA8/RA8          HD Camera ON/OFF
+//(=>SSDATA_OUT2)                TMS/PMA10/RA10 |pin12             pin33| SOSCI/RP4(1)/CN1/RB4  32.kHz quartz
+//(=>SSDATA_OUT3)                  TCK/PMA7/RA7 |pin13             pin32| TDO/PMA8/RA8          HD Camera ON/OFF
 //                  AN9/RP15(1)/CN11/PMCS1/RB15 |pin14             pin31| OSC2/CLKO/CN29/RA3    SSCS =>
 //                  AN9/RP15(1)/CN11/PMCS1/RB15 |pin15             pin30| OSC1/CLKI/CN30/RA2    SSDATA_OUT =>
 // GND                                     AVSS |pin16             pin29| VSS                   GND
@@ -3775,6 +3785,7 @@ void Reset_device(void)
 // (white)       PGED1/AN2/C2IN-/RP0(1)/CN4/RB0 |pin21             pin24| AN5/C1IN+/RP3(1)/CN7/RB3         <= analog Q2 IR
 // (gray)        PGEC1/AN3/C2IN+/RP1(1)/CN5/RB1 |pin22             pin23| AN4/C1IN-/RP2(1)/CN6/RB2         <= analog Q1 IR
 
+// SSDATA_OUT2,SSDATA_OUT3 for MAIN board on cubesat/craft
 
     // ANALOG configuration (for IR detector)
     // disable analog
@@ -3792,9 +3803,14 @@ void Reset_device(void)
     // RA8(pin32) HD Camera ON/OFF button (0) not pressed (1) pressed
     // RA9(pin35) HD Camera click1 button to click (0) not pressed (1) pressed
     // RA10(pin12) - output - not used
+#ifdef SSDATA_OUT2
+    //  SSDATA_OUT2 RA10 (pin12) SSDATA_OUT3 RA7 (pin13)
+    TRISA = 0b0000010010000100;  //0 = Output, 1 = Input 
+    PORTA = 0b0000000000001000;
+#else
     TRISA = 0b0000000000000100;  //0 = Output, 1 = Input 
     PORTA = 0b0000000000001000;
-
+#endif
     // PORTB
     // pin24| RB3 pin23| RB2 RB1 |pin22 RB0 |pin21 
     //TRISB = 0b0000000000000100;  //0 = Output, 1 = Input 
@@ -4506,8 +4522,25 @@ unsigned char GetSSByte(void)
         bset(SSPORT,SSCLOCK);
         //nop();
         //bitclr(bWork2,0); // bWork2 is unsigned == zero in low bit garanteed check assembler code to confirm
+#undef SSDATA_OUT2
+#ifdef SSDATA_OUT2
+        if (btest(SSPORT_READ,SSDATA_OUT))
+        {
+            if (btest(SSPORT_READ,SSDATA_OUT2))
+                goto FLASH_MAJORITY;
+            else if (btest(SSPORT_READ,SSDATA_OUT3))
+                goto FLASH_MAJORITY;
+        }
+        else if (btest(SSPORT_READ,SSDATA_OUT2))
+                 if (btest(SSPORT_READ,SSDATA_OUT3))
+                 {
+FLASH_MAJORITY:
+                     bitset(bWork2,0);
+                 }
+#else
         if (btest(SSPORT_READ,SSDATA_OUT_READ))
             bitset(bWork2,0);
+#endif
         bclr(SSPORT,SSCLOCK);
     }
     while (--bWork);
@@ -4515,6 +4548,24 @@ unsigned char GetSSByte(void)
     //bset(SSPORT,SSCS); // set high Chip Select
 }
 #pragma updateBank 1
+#ifdef FLASH_POWER_DOWN
+void CsLow(void)
+{
+    
+    bclr(SSPORT,SSCS); // set low Chip Select
+    SendSSByte(0xab);  // power save mode off
+    bset(SSPORT,SSCS); // set high Chip Select
+    //                    3mks needs to wait
+}
+void CsHigh(void)
+{
+     bset(SSPORT,SSCS); // set high Chip Select
+     nop();nop();
+     bclr(SSPORT,SSCS); // set low Chip Select
+     SendSSByte(0xb9);  // set power save mode
+     bset(SSPORT,SSCS); // set high Chip Select
+}
+#endif
 #endif
 ///////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////
