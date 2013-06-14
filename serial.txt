@@ -1,0 +1,11 @@
+wait 1 sec
+"2~ #1#2#3#4#5#6#7#8#9#a 21aaaaaaaaaaab13aaaaaab3"
+"2~1aaaaaaaaaaab13aaaaaab3"
+"2~1aaaaaaaaaaab3aaaaaab3"
+"2~21aaa#1#2#3#4#5#6#7aaaaaaaab13aaa#1#2#3#4#5#6aaab3"
+"2~1aa#2#3#1aaaaaaaaab13aaaaaab3"
+"22~11aa#2#3#1aaaaaaaaab33aaaaaab"
+"2~21aaaaaaaaaaab13aaaaaab3"
+0x0d 
+0x0a 
+"2~2"

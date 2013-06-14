@@ -1,6 +1,3 @@
-////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////
 // begin COPY 7
 ///////////////////////////////////////////////////////////////////////   
 // STREAM two types:
@@ -101,6 +98,8 @@ REPEAT_OP1:
             //}
             if (CallBkComm()) // 0 = do not process byte; 1 = process;
             {
+#ifdef NEW_CMD_PROC
+#else
                  // place where has to be checked realy message mode : if CallBkComm desided to process data then needs to monitor
                  // input message for not related to unit device
                  bWork = AInQu.Queue[AInQu.iExit]; // next char
@@ -183,6 +182,7 @@ REPEAT_OP1:
                  {
                      Monitor(bWork,MY_UNIT);
                  }
+#endif
 PROCESS_IN_CMD:
 
                  ProcessCMD(getch());

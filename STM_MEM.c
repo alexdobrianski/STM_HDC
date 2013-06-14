@@ -86,6 +86,12 @@ see www.adobri.com for communication protocol spec
 // will be responce on command "=<unit><cmd>"
 #define RESPONCE_ON_EQ
 
+// CMD switch processed in interrupt
+#define NEW_CMD_PROC 1
+
+// sync clock / timer support
+#define SYNC_CLOCK_TIMER  
+
 #ifdef _PIC16F88
 #include "int16CXX.H"
 #define RAM_BANK_0 0
@@ -221,7 +227,82 @@ unsigned DoCopyFromCom2:1;
 
 
 unsigned char TMR1YEAR;
+#ifdef SYNC_CLOCK_TIMER
+/////////////////////////////////////////////////////////////////////////////////////
+// synch clock/timer collection works that way:
+// 1. external device send <Unit>
+// 2. delay 10 ms
+// 3. send '~=9?'
+// on '~' TDelta collected
+// before sending '?' TAfter recorded
+// respons is '9?<TDelta><TBefore><TUpload><TAfter>' where: TBefore = TUpload = TAfter
+////////////////////////////////////////////////////////////////////////////////////  
 
+#ifdef __PIC24H__
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//                    mesaage receved over COM1 = on char '~' from GrStn needs to send first <Unit> then <~>
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////
+struct _Tdelta(
+rtccTimeDate Rtcc;
+unsigned long Timer;
+} Tdelta;
+
+//struct _TBefore(   // that delta is zero
+//rtccTimeDate Rtcc;
+//unsigned long Timer;
+//} TBefore;
+
+//struct _TUpload(   // that delta is zero
+//rtccTimeDate Rtcc;
+//unsigned long Timer;
+//} TUpload;
+//                    
+/////////////////////////////////////////////////////////////////////////////////////
+// after receving '~' from the loop on respond of '=X  ' clock+timer value stored
+////////////////////////////////////////////////////////////////////////////////////  
+struct _TAfter(     
+rtccTimeDate Rtcc;
+unsigned long Timer;
+} TAfter;
+#else
+#ifdef _18F2321_18F25K20
+////////////////////////////////////////////////////////////////////////////////////
+// for BT in mode ATDTEARTH on each interrupt of receved message on FQ1 TDelta stored
+// for BT in mode ATDTLUNA on receved from GrStn first byte of packet '5.....'
+////////////////////////////////////////////////////////////////////////////////////
+struct _TTdelta(
+unsigned int Timer1;
+unsigned int Timer;
+} TTdelta;
+/////////////////////////////////////////////////////////////////////////////////////
+// for BT in mode ATDTEARTH on sending to Main Ctrl message received from earth
+// for BT in mode ATDTLUNA on burst transfer of a data
+/////////////////////////////////////////////////////////////////////////////////////
+struct _TTBefore(
+unsigned int Timer1;
+unsigned int Timer;
+} TTBefore;
+/////////////////////////////////////////////////////////////////////////////////////
+// for BT in mode ATDTEARTH on receving from Main Ctrl message '5....'
+// for BT in mode ATDTLUNA on receive packet ofer FQ1
+/////////////////////////////////////////////////////////////////////////////////////
+struct _TTUpload(
+unsigned int Timer1;
+unsigned int Timer;
+} TTUpload;
+/////////////////////////////////////////////////////////////////////////////////////
+// for BT in mode ATDTEARTH on burst to send to Earth
+// for BT in mode ATDTLUNA on send packet to GrStn
+/////////////////////////////////////////////////////////////////////////////////////
+struct _TTAfter(
+unsigned int Timer1;
+unsigned int Timer;
+} TTAfter;
+
+#endif
+#endif
+
+#endif
 
 //#include "commc1.h"
 ///////////////////////////////////////////////////////////////////////
@@ -847,6 +928,149 @@ RC_24_ERROR:
                //Main.PrepI2C = 0;
                continue; // can be another bytes
 NO_RC_ERROR:
+#ifdef NEW_CMD_PROC
+               // optimized version
+               
+               if (Main.prepSkip)     // was skip = retransmit byte - top priority
+               {
+                   Main.prepSkip = 0;
+                   Main.prepZeroLen = 0;
+                   goto RELAY_SYMB; // ===> retransmit
+               }
+               else if (RetrUnit) // relay data to next unit during processing streaming == stream to another unit retransmit directly without entering queue
+               {
+                   if (work2 == ESC_SYMB) // do relay but account that is was ESC char 
+                   {
+                       Main.prepZeroLen = 0;
+                       Main.prepSkip = 1;//====> retransmit
+RELAY_SYMB:
+                       // exact copy from putchar == it is big!!! but it can be called recursivly!!
+                       ///////////////////////////////////////////////////////////////////////////////////////
+                       // direct output to com1
+                       ///////////////////////////////////////////////////////////////////////////////////////
+                       if (AOutQu.iQueueSize == 0)  // if this is a com and queue is empty then needs to directly send byte(s) 
+                       {                            // on 16LH88,16F884,18F2321 = two bytes on pic24 = 4 bytes
+                           // at that point Uart interrupt is disabled
+                           if (_TRMT)            // indicator that tramsmit shift register is empty (on pic24 it is also mean that buffer is empty too)
+                           {
+                               TXEN = 1;
+                               I2C.SendComOneByte = 0;
+                               TXREG = work2; // this will clean TXIF on 88,884 and 2321
+                           }
+                           else // case when something has allready send directly
+                           {
+#ifdef __PIC24H__
+                               TXIF = 0; // for pic24 needs to clean uart interrupt in software
+                               if (!U1STAbits.UTXBF) // on pic24 this bit is empy when at least there is one space in Tx buffer
+                                   TXREG = work2;   // full up TX buffer to full capacity, also cleans TXIF
+                               else
+                                   goto SEND_BYTE_TO_QU; // placing simbol into queue will also enable uart interrupt
+#else
+                               if (!I2C.SendComOneByte)      // one byte was send already 
+                               {
+                                   TXREG = work2;           // this will clean TXIF 
+                                   I2C.SendComOneByte = 1;
+                               }
+                               else                     // two bytes was send on 88,884,2321 and up to 4 was send on pic24
+                               {
+                                   goto SEND_BYTE_TO_QU; // placing simbol into queue will also enable uart interrupt
+                               }
+#endif
+                           }
+                       }
+                       else
+                       {
+                           if (AOutQu.iQueueSize < OUT_BUFFER_LEN)
+                           {
+SEND_BYTE_TO_QU:
+                               AOutQu.Queue[AOutQu.iEntry] = work2; // add bytes to a queue
+                               if (++AOutQu.iEntry >= OUT_BUFFER_LEN)
+                                   AOutQu.iEntry = 0;
+                               AOutQu.iQueueSize++; // this is unar operation == it does not interfere with interrupt service decrement
+                               //if (!Main.PrepI2C)      // and allow transmit interrupt
+                               TXIE = 1;  // placed simbol will be pushed out of the queue by interrupt
+                           } 
+                       }
+                       goto END_INPUT_COM;
+                       /////////////////////////////////////////////////////////////////////////////////////////////
+                       //   end of direct output to com1
+                       /////////////////////////////////////////////////////////////////////////////////////////////
+                   }
+                   else if (work2 == RetrUnit) // relay done
+                   {
+                       if (Main.prepZeroLen) // packets with 0 length does not exsists
+                           goto RELAY_SYMB; // ===> retransmit
+                       RetrUnit = 0;
+                       goto RELAY_SYMB; // ===> retransmit
+                   }
+                   else if (work2 == MY_UNIT)
+                   {
+                       RetrUnit = 0;
+                       goto SET_MY_UNIT;
+                   }
+                   else if (work2 <= MAX_ADR)
+                   {            
+                       if (work2 >= MIN_ADR) // msg to relay
+                           goto TO_ANOTHER_UNIT;
+                   }
+                   
+                   Main.prepZeroLen = 0;
+                   goto RELAY_SYMB; // ===> retransmit
+               }
+               else if (Main.getCMD)
+               {
+                   if (Main.CheckESC)
+                   {
+                      Main.CheckESC = 0;  // =======> process message => insert in queue
+                   }
+                   else if (work2 == ESC_SYMB)
+                   {
+                        Main.CheckESC = 1;
+                   }
+                   else if (work2 == MY_UNIT)
+                      ; // =======> process message => insert in queue
+                   else if (work2 <= MAX_ADR)
+                   {            
+                       if (work2 >= MIN_ADR) // msg to relay
+                          // retransmit to another unit has a priority - current status freazed
+                           goto TO_ANOTHER_UNIT;
+                   }         
+                   ;  // =======> process message => insert in queue
+               }
+               else // not a command mode == stream mode 
+               if (work2 == ESC_SYMB) // do relay
+               {
+                   Main.prepZeroLen = 0;
+                   Main.prepSkip = 1;//====> retransmit
+                   goto RELAY_SYMB; // ===> retransmit
+               }
+               else if (work2 == MY_UNIT) // message addresed to a unit
+               {
+SET_MY_UNIT:
+                   Main.getCMD =1; // byte eated
+                   I2C.LastWasUnitAddr = 1;
+                   Main.CheckESC = 0;
+                   Main.ESCNextByte = 0;
+                   goto END_INPUT_COM;
+               }
+               else
+               {
+                   if (work2 <= MAX_ADR)
+                   {            
+                       if (work2 >= MIN_ADR) // msg to relay to another untis
+                       {
+TO_ANOTHER_UNIT:          
+                           RetrUnit = work2;
+                           Main.prepZeroLen = 1;
+                           Main.prepSkip = 0;
+                       }
+                   }
+                   goto RELAY_SYMB; // ===> retransmit
+               }
+//////////////////////////////////////////////////////////////////
+// end of optimized version
+//////////////////////////////////////////////////////////////////
+#else
                if (RetrUnit) // relay data to next unit during processing streaming == stream to another unit retransmit directly without entering queue
                {
                    if (Main.prepStream)
@@ -856,12 +1080,12 @@ NO_RC_ERROR:
                        {
                            Main.prepSkip = 0;
                            Main.prepZeroLen = 0;
-                           goto RELAY_SYMB;
+                           goto RELAY_SYMB; // ===> retransmit
                        }
                        else if (work2 == ESC_SYMB) // do relay
                        {
                            Main.prepZeroLen = 0;
-                           Main.prepSkip = 1;
+                           Main.prepSkip = 1;//====> retransmit
 RELAY_SYMB:
                            // exact copy from putchar == it is big!!! but it can be called recursivly!!
                            ///////////////////////////////////////////////////////////////////////////////////////
@@ -919,7 +1143,7 @@ SEND_BYTE_TO_QU:
                        else if (work2 == RetrUnit) // relay done
                        {
                            if (Main.prepZeroLen) // packets with 0 length does not exsists
-                               goto RELAY_SYMB;
+                               goto RELAY_SYMB; // ===> retransmit
                            RetrUnit = 0;
                            Main.prepStream = 1;
 #ifdef ALLOW_RELAY_TO_NEW
@@ -928,15 +1152,17 @@ SEND_BYTE_TO_QU:
 #else
                            AllowMask = 0xff; // it is possible to send msg to any unit over COM
 #endif
-                           goto RELAY_SYMB;
+                           goto RELAY_SYMB; // ===> retransmit
                        }
 #ifdef ALLOW_RELAY_TO_NEW
 #endif
                        Main.prepZeroLen = 0;
-                       goto RELAY_SYMB;
+                       goto RELAY_SYMB; // ===> retransmit
                    }
+                   // ===> process simbol
                }
-
+#endif
+INSERT_TO_COM_Q:
                if (AInQu.iQueueSize < BUFFER_LEN)
                {
                    AInQu.Queue[AInQu.iEntry] = work2;
@@ -1806,6 +2032,8 @@ MAIN_EXIT:
 // temp vars will be on bank 1 together with I2C queue
 #pragma rambank RAM_BANK_1
 ////////////////////////////////////BANK 1////////////////////////////////////
+#ifdef NEW_CMD_PROC
+#else
 unsigned char Monitor(unsigned char bWork, unsigned char CheckUnit)
 {
     if (Main.prepSkip)
@@ -1836,7 +2064,7 @@ unsigned char Monitor(unsigned char bWork, unsigned char CheckUnit)
         Main.prepZeroLen = 0;
     return 0;
 }
-
+#endif
 //////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////
@@ -1925,6 +2153,9 @@ void main()
         Main.ESCNextByte = 0;
         Main.PrepI2C = 0;
         Main.DoneWithCMD = 1;
+#ifdef NEW_CMD_PROC
+        Main.CheckESC = 1;
+#endif
         RetransmitLen = 0;
         //Main.SendWithEsc = 0;
         //Main.CommLoopOK = 0;
@@ -2108,6 +2339,8 @@ REPEAT_OP1:
             //}
             if (CallBkComm()) // 0 = do not process byte; 1 = process;
             {
+#ifdef NEW_CMD_PROC
+#else
                  // place where has to be checked realy message mode : if CallBkComm desided to process data then needs to monitor
                  // input message for not related to unit device
                  bWork = AInQu.Queue[AInQu.iExit]; // next char
@@ -2190,6 +2423,7 @@ REPEAT_OP1:
                  {
                      Monitor(bWork,MY_UNIT);
                  }
+#endif
 PROCESS_IN_CMD:
 
                  ProcessCMD(getch());
@@ -2218,37 +2452,6 @@ NO_PROCESS_IN_CMD:;
 
 } // at the end will be Sleep which then continue to main
 
-#define SPBRG_4800_40MIPS 2064
-
-#define SPBRG_9600 51
-#define SPBRG_9600_40MIPS 1040
-
-#define SPBRG_19200 25
-
-#define SPBRG_19200_8MHZ 25
-#define SPBRG_19200_16MHZ 51
-#define SPBRG_19200_32MHZ 103
-#define SPBRG_19200_64MHZ 207
-#define SPBRG_19200_40MIPS 519
-
-#define SPBRG_38400_8MHZ 13
-#define SPBRG_38400_16MHZ 25
-#define SPBRG_38400_32MHZ 51
-#define SPBRG_38400_64MHZ 103
-#define SPBRG_38400_40MIPS 259
-
-#define SPBRG_38400 12
-
-#define SPBRG_57600 8
-#define SPBRG_57600_16MHZ 16
-#define SPBRG_57600_32MHZ 34
-#define SPBRG_57600_64MHZ 68
-#define SPBRG_57600_40MIPS 172
-
-#define SPBRG_115200_16MHZ 8
-#define SPBRG_115200_32MHZ 16
-#define SPBRG_115200_64MHZ 34
-#define SPBRG_115200_40MIPS 85
 #define SPBRG_SPEED     SPBRG_57600_40MIPS
 #define SPBRG_SPEEDCOM2 SPBRG_9600_40MIPS
 
@@ -2900,6 +3103,8 @@ void ProcessCMD(unsigned char bByte)
 /////////////////////////////////////////////////////////////////////
     //if (!Main.getCMD) // outside of the include was if == unit in "stream" relay mode
     //{
+#ifdef NEW_CMD_PROC
+#else
         // getCMD == 0
         // in stream was ESC char and now needs to echo that char to loop
         if (Main.ESCNextByte)
@@ -2921,6 +3126,7 @@ void ProcessCMD(unsigned char bByte)
         }
         // relay char to the loop, bcs now it is "stream" mode      
         putch(bByte); //ok
+#endif
 SKIP_ECHO_BYTE: ;
     }
     else    // now unit in command mode == processing all data
@@ -3641,6 +3847,7 @@ void Reset_device(void)
      //RtccWriteTimeDate(&RtccTimeDate,TRUE);
      //RtccReadTimeDate(&RtccTimeDateVal);
      mRtccOn();
+     TMR1YEAR = 128;
      RtccReadTimeDate(&RtccTimeDateVal);
      if ((RtccTimeDateVal.f.mday > 0x31) ||
          ((RtccTimeDateVal.f.mday & 0x0f) > 0x9) || 
@@ -3658,6 +3865,7 @@ void Reset_device(void)
          RtccWriteTimeDate(&RtccTimeDateVal,TRUE);
          mRtccOn();
      }
+     
 
      
 
