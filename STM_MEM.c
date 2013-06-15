@@ -89,8 +89,15 @@ see www.adobri.com for communication protocol spec
 // CMD switch processed in interrupt
 #define NEW_CMD_PROC 1
 
-// sync clock / timer support
+// sync clock / timeral  support
 #define SYNC_CLOCK_TIMER  
+
+// using RTTC interrupt to properly measure time
+#ifdef SYNC_CLOCK_TIMER
+#ifdef __PIC24H__
+#define RTTC_INT 1
+#endif
+#endif
 
 #ifdef _PIC16F88
 #include "int16CXX.H"
@@ -253,7 +260,7 @@ unsigned char TMR1YEAR;
 //                    mesaage receved over COM1 = on char '~' from GrStn needs to send first <Unit> then <~>
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
 struct _Tdelta{
-rtccTimeDate RtccT;
+rtccTimeDate Rtcc;
 unsigned long Timer;
 } Tdelta;
 
@@ -271,7 +278,7 @@ unsigned long Timer;
 // after receving '~' from the loop on respond of '=X  ' clock+timer value stored
 ////////////////////////////////////////////////////////////////////////////////////  
 struct _TAfter{     
-rtccTimeDate RtccT;
+rtccTimeDate Rtcc;
 unsigned long Timer;
 } TAfter;
 #else
@@ -366,6 +373,8 @@ unsigned int Timer;
 #endif
 
 #define IF_SLAVEI2C void __attribute__((interrupt, no_auto_psv)) _SI2C1Interrupt(void)
+
+#define IF_RTTC void __attribute__((interrupt, no_auto_psv)) _RTCCInterrupt(void)
 
 #endif // C30 ends
 #else // end of C30 support
@@ -1307,7 +1316,12 @@ SPEED_TX:
        }
 CONTINUE_WITH_ISR:;
    }
-   
+#ifdef RTTC_INT
+   IF_RTTC
+   {
+nop();
+   }
+#endif   
     /////////////////////////////////////////////////////////////////////////////////////////////
     IF_TIMER0_INT_FLG //if (TIMER0_INT_FLG) // can be transfer byte using TMR0
     {
@@ -1695,6 +1709,7 @@ TMR0_DONE:
     IF_TMR1IF //if (TMR1IF)  // update clock
     {
         TMR1IF = 0;
+         
 #ifdef BT_TIMER1
         if (DataB0.Timer1Meausre)
         {
@@ -1791,6 +1806,7 @@ RE_READ_TMR1:
         }
         else if (TMR130 >TIMER1_ADJ0)
         {
+            RtccReadTimeDate(&RtccTimeDateVal);
 TMR2_COUNT_DONE:
             TMR130 = 0;
             if (++TMR1SEC > 59)
@@ -3882,6 +3898,49 @@ void Reset_device(void)
          mRtccOn();
      }
      
+     mRtccClearAlrmPtr();
+     mRtccSetAlrmPtr(RTCC_RPT_SEC);
+     RtccSetChimeEnable(1, 1);
+     mRtccSetInt(1); // interrupt RTTC enabled    
+///////////////////////////////////////////////////////////////////////
+// Timer1 (on another devices it will be TMR2
+    // on 24 timer0 == TMR1 timer1 == TMR2
+    //      1                  bit 15 TON: Timerx On bit
+    //                          When T32 = 1 (in 32-bit Timer mode):
+    //                          1 = Starts 32-bit TMRx:TMRy timer pair
+    //                          0 = Stops 32-bit TMRx:TMRy timer pair
+    //                           When T32 = 0 (in 16-bit Timer mode):
+    //                          1 = Starts 16-bit timer
+    //                          0 = Stops 16-bit timer
+    //       0                 bit 14 Unimplemented: Read as æ0Æ
+    //        0                bit 13 TSIDL: Stop in Idle Mode bit
+    //                            1 = Discontinue timer operation when device enters Idle mode
+    //                            0 = Continue timer operation in Idle mode
+    //         000000          bit 12-7 Unimplemented: Read as æ0Æ
+    //               0         bit 6 TGATE: Timerx Gated Time Accumulation Enable bit
+    //                          When TCS = 1:
+    //                            This bit is ignored.
+    //                          When TCS = 0:
+    //                            1 = Gated time accumulation enabled
+    //                            0 = Gated time accumulation disabled
+    //                01       bit 5-4 TCKPS<1:0>: Timerx Input Clock Prescale Select bits
+    //                           11 = 1:256 prescale value
+    //                           10 = 1:64 prescale value
+    //                           01 = 1:8 prescale value
+    //                           00 = 1:1 prescale value
+    //                  0      bit 3 T32: 32-bit Timerx Mode Select bit
+    //                            1 = TMRx and TMRy form a 32-bit timer
+    //                            0 = TMRx and TMRy form separate 16-bit timer
+    //                   0     bit 2 Unimplemented: Read as æ0Æ
+    //                    0    bit 1 TCS: Timerx Clock Source Select bit
+    //                            1 = External clock from TxCK pin
+    //                            0 = Internal clock (FOSC/2)
+    //                     0   bit 0 Unimplemented: Read as æ0Æ
+    T2CON=0b1000000000010000;
+
+    TMR1IF = 0; // clean timer1 interrupt
+    TMR1IE = 1; // diasable timer1 interrupt
+  ////////////////////////////////////////////////////////////////////////////////
 
      
 
@@ -3898,8 +3957,8 @@ void Reset_device(void)
     //enable_I2C();
     //TIMER0_INT_FLG = 0; // clean timer0 interrupt
     //TIMER0_INT_ENBL = 0; // diasable timer0 interrupt
-    //TMR1IF = 0; // clean timer0 interrupt
-    //TMR1IE = 0; // diasable timer0 interrupt
+    //TMR1IF = 0; // clean timer1 interrupt
+    //TMR1IE = 0; // diasable timer1 interrupt
     //INT0_EDG = 1; // 1 = Interrupt on negative edge
     //INT0_FLG = 0; // clean extrnal interrupt RB0 pin 6
 
@@ -4343,6 +4402,7 @@ void enable_I2C(void)
 void EnableTMR1(void)
 {
 #ifdef __PIC24H__
+
 #else
     TMR1L =0;
     TMR1H = 0;
