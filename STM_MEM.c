@@ -245,6 +245,32 @@ unsigned DoCopyFromCom2:1;
 
 unsigned char TMR1YEAR;
 #ifdef SYNC_CLOCK_TIMER
+
+/*
+unsigned int TmrMSValNew;
+unsigned int TmrMSVal;
+unsigned int TmrMSValOld;
+unsigned int TmrMSValOld2;
+unsigned int TmrAllVal;
+unsigned int TmrAllValOld;
+unsigned int TmrAllValOld2;
+unsigned int TmrAllValOld3;
+unsigned int TmrAllConter;
+unsigned int TmrAllConterOld;
+unsigned int TmrAllConterOld2;
+unsigned int TmrAllConterOld3;
+
+*/
+unsigned int RTTCCounts;
+unsigned int Tmr4CountH;
+unsigned int Tmr4CountOldH;
+unsigned int Tmr4CountOld2H;
+unsigned int Tmr4CountOld3H;
+unsigned int Tmr4Count;
+unsigned int Tmr4CountOld;
+unsigned int Tmr4CountOld2;
+unsigned int Tmr4CountOld3;
+
 /////////////////////////////////////////////////////////////////////////////////////
 // synch clock/timer collection works that way:
 // 1. external device send <Unit>
@@ -374,7 +400,9 @@ unsigned int Timer;
 
 #define IF_SLAVEI2C void __attribute__((interrupt, no_auto_psv)) _SI2C1Interrupt(void)
 
-#define IF_RTTC void __attribute__((interrupt, no_auto_psv)) _RTCCInterrupt(void)
+#define IF_TMR5IF void __attribute__((interrupt, no_auto_psv)) _T5Interrupt(void)
+#define IF_TMR4IF void __attribute__((interrupt, no_auto_psv)) _T4Interrupt(void)
+#define IF_RTCC void __attribute__((interrupt, no_auto_psv)) _RTCCInterrupt(void)
 
 #endif // C30 ends
 #else // end of C30 support
@@ -1316,12 +1344,6 @@ SPEED_TX:
        }
 CONTINUE_WITH_ISR:;
    }
-#ifdef RTTC_INT
-   IF_RTTC
-   {
-nop();
-   }
-#endif   
     /////////////////////////////////////////////////////////////////////////////////////////////
     IF_TIMER0_INT_FLG //if (TIMER0_INT_FLG) // can be transfer byte using TMR0
     {
@@ -1705,11 +1727,12 @@ TMR0_DONE:
 //    else 
 //NextCheckBit:
 
+
     /////////////////////////////////////////////////////////////////////////////////////////////
     IF_TMR1IF //if (TMR1IF)  // update clock
     {
         TMR1IF = 0;
-         
+        //TmrAllConter++; 
 #ifdef BT_TIMER1
         if (DataB0.Timer1Meausre)
         {
@@ -1815,6 +1838,7 @@ TMR2_COUNT_DONE:
                 if (++TMR1MIN > 59)
                 {
                     TMR1MIN = 0;
+                    RTTCCounts = 0;
                     if (++TMR1HOUR > 23)
                     {
                          TMR1HOUR = 0;
@@ -1852,6 +1876,64 @@ TMR2_COUNT_DONE:
         }
 #endif
     }
+
+#ifdef RTTC_INT
+
+
+   IF_RTCC
+   {
+/*
+       TmrMSValNew = TMR2;
+
+       TmrMSValOld  = TmrMSVal;
+       TmrMSVal     = TmrMSValNew;
+
+       TmrAllValOld3 = TmrAllValOld2;
+       TmrAllValOld2 = TmrAllValOld;
+       TmrAllValOld = TmrAllVal;
+       TmrAllVal = TmrMSValNew - TmrMSValOld;
+
+       TmrAllConterOld3 = TmrAllConterOld2;
+       TmrAllConterOld2 = TmrAllConterOld;
+       TmrAllConterOld = TmrAllConter;
+       TmrAllConter = 0;
+*/
+       
+       Tmr4CountOld3H= Tmr4CountOld2H;
+       Tmr4CountOld2H= Tmr4CountOldH;
+       Tmr4CountOldH= Tmr4CountH;
+       Tmr4CountOld3= Tmr4CountOld2;
+       Tmr4CountOld2= Tmr4CountOld;
+       Tmr4CountOld= Tmr4Count;
+
+       T4CONbits.TON = 0;
+       Tmr4Count =TMR4;
+       Tmr4CountH = TMR5HLD;
+       IFS1bits.T4IF = 0;
+       IFS1bits.T5IF = 0;
+       TMR5HLD = 0;
+       TMR4 = 0;
+      
+       T4CONbits.TON = 1;
+       RTTCCounts++;
+       //RtccReadTimeDate(&RtccTimeDateVal);
+       IFS3bits.RTCIF = 0;        
+   }
+    IF_TMR4IF
+    {
+        nop();
+        nop();
+        IFS1bits.T4IF = 0;
+    }
+
+    IF_TMR5IF
+    {
+        nop();
+        nop();
+        IFS1bits.T5IF = 0;
+    }
+#endif   
+
 #ifdef BT_TIMER3
     IF_TMR3IF // RX timer
     {
@@ -2462,7 +2544,7 @@ NO_PROCESS_IN_CMD:;
             {
                 //if (I2C_B1.I2CMasterDone) // no communication over I2C
 #ifdef __PIC24H__
-                CLKDIVbits.DOZEN = 1; // switch clock from 40MOP=>1.25MOP
+                //CLKDIVbits.DOZEN = 1; // switch clock from 40MOP=>1.25MOP
 #else
 #endif
             }
@@ -3895,13 +3977,46 @@ void Reset_device(void)
          RtccTimeDateVal.f.sec = 0x01;RtccTimeDateVal.f.wday = 0x05;
          //mRtccOff();
          RtccWriteTimeDate(&RtccTimeDateVal,TRUE);
-         mRtccOn();
+         //mRtccOn();
      }
      
-     mRtccClearAlrmPtr();
-     mRtccSetAlrmPtr(RTCC_RPT_SEC);
-     RtccSetChimeEnable(1, 1);
+     //mRtccClearAlrmPtr();
+     //mRtccSetAlrmPtr(RTCC_RPT_SEC);
+//          1                 bit 15   ALRMEN: Alarm Enable bit
+//                              1 = Alarm is enabled (cleared automatically after an alarm event whenever ARPT<7:0> = 0x00 and  CHIME = 0)
+//                              0 = Alarm is disabled
+//           1                bit 14 CHIME: Chime Enable bit
+//                              1 = Chime is enabled; ARPT<7:0> bits are allowed to roll over from 0x00 to 0xFF
+//                              0 = Chime is disabled; ARPT<7:0> bits stop once they reach 0x00
+//            0001            bit 13-10 AMASK<3:0>: Alarm Mask Configuration bits
+//                              0000 = Every half second
+//                              0001 = Every second
+//                              0010 = Every 10 seconds
+//                              0011 = Every minute
+//                              0100 = Every 10 minutes
+//                              0101 = Every hour
+//                              0110 = Once a day
+//                              0111 = Once a week
+//                              1000 = Once a month
+//                              1001 = Once a year (except when configured for February 29, once every four years)
+//                              101x = Reserved
+//                              11xx = Reserved
+//                00          bit 9-8 ALRMPTR<1:0>: Alarm Value Register Window Pointer bits
+//                              Points to the corresponding Alarm Value registers when reading ALRMVALH and ALRMVALL registers;
+//                              the ALRMPTR<1:0> value decrements on every read or write of ALRMVALH until it reaches ‘00’. Refer
+//                              to Table 37-2, for bit descriptions.
+//                  00000000  bit 7-0 ARPT<7:0>: Alarm Repeat Counter Value bits
+//                              11111111 = Alarm will repeat 255 more times
+//                              00000000 = Alarm will not repeat
+ALCFGRPT= 0b1100010000000000;
+     RtccSetChimeEnable(1, 0);
+     mRtccAlrmEnable();
+     //mRtccSetIntPriority(7);
      mRtccSetInt(1); // interrupt RTTC enabled    
+     mRtccOn();
+     //IEC3bits.RTCIE = 1; 
+     //IFS3bits.RTCIF = 0; 
+
 ///////////////////////////////////////////////////////////////////////
 // Timer1 (on another devices it will be TMR2
     // on 24 timer0 == TMR1 timer1 == TMR2
@@ -3936,10 +4051,20 @@ void Reset_device(void)
     //                            1 = External clock from TxCK pin
     //                            0 = Internal clock (FOSC/2)
     //                     0   bit 0 Unimplemented: Read as æ0Æ
-    T2CON=0b1000000000010000;
+    T4CON=0b1000000000001000;
 
-    TMR1IF = 0; // clean timer1 interrupt
-    TMR1IE = 1; // diasable timer1 interrupt
+    IFS1bits.T4IF = 0; // clean timer4 interrupt
+    //IEC1bits.T4IE = 1; // enable timer4 interrupt
+    IFS1bits.T5IF = 0; // clean timer4 interrupt
+    //IEC1bits.T5IE = 1; // enable timer4 interrupt
+
+//  timer 4 is 32 bit counter
+    PR4 = 0;//xffff;
+    TMR5HLD = 0;//xffff;
+    TMR4 = 0;//xffff;
+    
+    PR5 = 0x8000;//xffff;
+    
   ////////////////////////////////////////////////////////////////////////////////
 
      
