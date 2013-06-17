@@ -95,7 +95,7 @@ see www.adobri.com for communication protocol spec
 // using RTTC interrupt to properly measure time
 #ifdef SYNC_CLOCK_TIMER
 #ifdef __PIC24H__
-#define RTTC_INT 1
+#define RTCC_INT 1
 #endif
 #endif
 
@@ -246,59 +246,62 @@ unsigned DoCopyFromCom2:1;
 unsigned char TMR1YEAR;
 #ifdef SYNC_CLOCK_TIMER
 
-/*
-unsigned int TmrMSValNew;
-unsigned int TmrMSVal;
-unsigned int TmrMSValOld;
-unsigned int TmrMSValOld2;
-unsigned int TmrAllVal;
-unsigned int TmrAllValOld;
-unsigned int TmrAllValOld2;
-unsigned int TmrAllValOld3;
-unsigned int TmrAllConter;
-unsigned int TmrAllConterOld;
-unsigned int TmrAllConterOld2;
-unsigned int TmrAllConterOld3;
-
-*/
 unsigned int RTTCCounts;
 unsigned int Tmr4CountH;
-unsigned int Tmr4CountOldH;
-unsigned int Tmr4CountOld2H;
-unsigned int Tmr4CountOld3H;
 unsigned int Tmr4Count;
-unsigned int Tmr4CountOld;
-unsigned int Tmr4CountOld2;
-unsigned int Tmr4CountOld3;
+
+unsigned long Tmr4CountOld;
+unsigned long Tmr4CountOld2;
+unsigned long Tmr4CountOld3;
 
 /////////////////////////////////////////////////////////////////////////////////////
 // synch clock/timer collection works that way:
-// 1. external device send <Unit>
-// 2. delay 10 ms
-// 3. send '~=9?'
-// on '~' TDelta collected
-// before sending '?' TAfter recorded
-// respons is '9?<TDelta><TBefore><TUpload><TAfter>' where: TBefore = TUpload = TAfter
-////////////////////////////////////////////////////////////////////////////////////  
+// 0. i.e. Unit = 2 
+// 1. send 2~=9?2
+//          ~        Ttilda recorded
+//           =9?     cmd set reply unit '9' and responce cmd '?'
+//             ?<------- Tdelta = Ttilda; TAfter recorded; responce send:
+//              9?<TDelta><TBefore=0><TUpload=0><TAfter>9 packet
+//
+// 2. send '~=5~'
+//          ~              Ttilda recorded
+//           =5~           cmd set reply unit '5' and responce cmd '~'
+//             ~<-------   Tdelat = Ttilda; TBefore recoreded; responce send
+//              5~=2?5   - device '5' will respond with 2?<TDelta><TBefore=0><TUpload=0><TAfter>9 packet
+// from '5' ->        2?<TDelta><TBefore=0><TUpload=0><TAfter>9
+//                    2<---- Ttilda recorded
+//                     ?<---- TUpload = Ttilda
+//                      
+///////////////////////////////////////////////////////////////////////////////////  
 
 #ifdef __PIC24H__
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //                    mesaage receved over COM1 = on char '~' from GrStn needs to send first <Unit> then <~>
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
+struct _Ttilda{
+rtccTimeDate Rtcc;
+unsigned long Timer;
+unsigned long Second;
+} Ttilad;
+
+
 struct _Tdelta{
 rtccTimeDate Rtcc;
 unsigned long Timer;
+unsigned long Second;
 } Tdelta;
 
-//struct _TBefore{   // that delta is zero
-//rtccTimeDate Rtcc;
-//unsigned long Timer;
-//} TBefore;
+struct _TBefore{   // that delta is zero
+rtccTimeDate Rtcc;
+unsigned long Timer;
+unsigned long Second;
+} TBefore;
 
-//struct _TUpload{   // that delta is zero
-//rtccTimeDate Rtcc;
-//unsigned long Timer;
-//} TUpload;
+struct _TUpload{   // that delta is zero
+rtccTimeDate Rtcc;
+unsigned long Timer;
+unsigned long Second;
+} TUpload;
 //                    
 /////////////////////////////////////////////////////////////////////////////////////
 // after receving '~' from the loop on respond of '=X  ' clock+timer value stored
@@ -306,6 +309,7 @@ unsigned long Timer;
 struct _TAfter{     
 rtccTimeDate Rtcc;
 unsigned long Timer;
+unsigned long Second;
 } TAfter;
 #else
 #ifdef _18F2321_18F25K20
@@ -954,6 +958,21 @@ MAIN_EXIT:;
 
                work1 = RCSTA;
                work2 = RCREG;
+#ifdef SYNC_CLOCK_TIMER
+
+               if (work2 == '~') // record time of received message
+               {
+#ifdef __PIC24H__
+                   Tmr4Count =TMR4;
+                   Tmr4CountH = TMR5HLD;
+                   Ttilad.Timer = (((unsigned long)Tmr4CountH)<<16) | ((unsigned long)Tmr4Count);
+                   Ttilad.Second = Tmr4CountOld;
+                   RtccReadTimeDate(&Ttilad.Rtcc);
+#else
+#endif
+               }
+#endif
+
 #ifdef __PIC24H__
                goto NO_RC_ERROR;
 #else
@@ -1877,61 +1896,39 @@ TMR2_COUNT_DONE:
 #endif
     }
 
-#ifdef RTTC_INT
-
+#ifdef RTCC_INT
 
    IF_RTCC
    {
-/*
-       TmrMSValNew = TMR2;
 
-       TmrMSValOld  = TmrMSVal;
-       TmrMSVal     = TmrMSValNew;
-
-       TmrAllValOld3 = TmrAllValOld2;
-       TmrAllValOld2 = TmrAllValOld;
-       TmrAllValOld = TmrAllVal;
-       TmrAllVal = TmrMSValNew - TmrMSValOld;
-
-       TmrAllConterOld3 = TmrAllConterOld2;
-       TmrAllConterOld2 = TmrAllConterOld;
-       TmrAllConterOld = TmrAllConter;
-       TmrAllConter = 0;
-*/
-       
-       Tmr4CountOld3H= Tmr4CountOld2H;
-       Tmr4CountOld2H= Tmr4CountOldH;
-       Tmr4CountOldH= Tmr4CountH;
-       Tmr4CountOld3= Tmr4CountOld2;
-       Tmr4CountOld2= Tmr4CountOld;
-       Tmr4CountOld= Tmr4Count;
-
-       T4CONbits.TON = 0;
        Tmr4Count =TMR4;
        Tmr4CountH = TMR5HLD;
-       IFS1bits.T4IF = 0;
-       IFS1bits.T5IF = 0;
+
+       T4CONbits.TON = 0;
        TMR5HLD = 0;
        TMR4 = 0;
-      
        T4CONbits.TON = 1;
+       
+       Tmr4CountOld3= Tmr4CountOld2;
+       Tmr4CountOld2= Tmr4CountOld;
+       Tmr4CountOld= (((unsigned long)Tmr4CountH)<<16) | ((unsigned long)Tmr4Count);
+
        RTTCCounts++;
-       //RtccReadTimeDate(&RtccTimeDateVal);
        IFS3bits.RTCIF = 0;        
    }
-    IF_TMR4IF
-    {
-        nop();
-        nop();
-        IFS1bits.T4IF = 0;
-    }
-
-    IF_TMR5IF
-    {
-        nop();
-        nop();
-        IFS1bits.T5IF = 0;
-    }
+//    IF_TMR4IF
+//    {
+//        nop();
+//        nop();
+//        IFS1bits.T4IF = 0;
+//    }
+//
+//    IF_TMR5IF
+//    {
+//        nop();
+//        nop();
+//        IFS1bits.T5IF = 0;
+//    }
 #endif   
 
 #ifdef BT_TIMER3
@@ -2203,30 +2200,11 @@ void SendSSByteFAST(unsigned char bByte); // for a values <= 3
 void main()
 {
     unsigned char bWork;
-    /*if (POR_) // this is can be sync of a timer from MCLR
-    {
-        if (SetSyncTime)
-        {
-            TMR1L = 0; // must be delay in 2MHz clock
-            TMR1H = 0;
-            TMR130 = setTMR130;
-            TMR1SEC = setTMR1SEC;
-            TMR1MIN = setTMR1MIN;
-            TMR1HOUR = setTMR1HOUR;
-            TMR1DAY = setTMR1DAY;
-        }
-    }*/
-    
+
     Reset_device();
     // needs to check what is it:
 
-    //if (TO) // Power up or MCLR
-    {
-       // Unit == 1 (one) is ADC and unit == 2 (two) is DAC 
-        // Unit == 3 Gyro
-        //UnitADR = '1';
-        UnitADR = '2'; // mem/ camera/ backup comm/ unit 2
-        //UnitADR = '4';
+    UnitADR = MY_UNIT; // mem/ camera/ backup comm/ unit 2
 //#include "commc6.h"
 ////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////
@@ -3806,7 +3784,7 @@ void Reset_device(void)
                                 // 00 = Output/2
 	CLKDIVbits.PLLPRE=0;		// N1=2 PLL Phase Detector Input Divider bits (also denoted as µN1¦, PLL prescaler)
                                 // 00000 = Input/2 (default)
-	OSCTUN=0;//0x14;                // Tune FRC oscillator, if FRC is used
+	OSCTUN=0b111011;//0x14;                // Tune FRC oscillator, if FRC is used
                                 // bit 5-0 TUN<5:0>: FRC Oscillator Tuning bits(1)
                                 // 111111 = Center frequency -0.375% (7.345 MHz)
                                 // 100001 = Center frequency -11.625% (6.52 MHz)
@@ -3974,7 +3952,7 @@ void Reset_device(void)
          RtccTimeDateVal.f.mday = 0x13;RtccTimeDateVal.f.mon=0x03;
          RtccTimeDateVal.f.year=0x13;
          RtccTimeDateVal.f.hour = 0x10;RtccTimeDateVal.f.min = 0x01;
-         RtccTimeDateVal.f.sec = 0x01;RtccTimeDateVal.f.wday = 0x05;
+         RtccTimeDateVal.f.sec = 0x01;RtccTimeDateVal.f.wday = 0x10;
          //mRtccOff();
          RtccWriteTimeDate(&RtccTimeDateVal,TRUE);
          //mRtccOn();
@@ -4011,7 +3989,7 @@ void Reset_device(void)
 ALCFGRPT= 0b1100010000000000;
      RtccSetChimeEnable(1, 0);
      mRtccAlrmEnable();
-     //mRtccSetIntPriority(7);
+     mRtccSetIntPriority(1);
      mRtccSetInt(1); // interrupt RTTC enabled    
      mRtccOn();
      //IEC3bits.RTCIE = 1; 
@@ -4019,6 +3997,20 @@ ALCFGRPT= 0b1100010000000000;
 
 ///////////////////////////////////////////////////////////////////////
 // Timer1 (on another devices it will be TMR2
+//    Timer 4 is running but nopt rebooted
+    IFS1bits.T4IF = 0; // clean timer4 interrupt
+    //IEC1bits.T4IE = 1; // enable timer4 interrupt
+    IFS1bits.T5IF = 0; // clean timer4 interrupt
+    //IEC1bits.T5IE = 1; // enable timer4 interrupt
+
+//  timer 4 is 32 bit counter
+    PR4 = 0;//xffff;
+    TMR5HLD = 0;//xffff;
+    TMR4 = 0;//xffff;
+    
+    PR5 = 0x8000;//xffff;
+    IPC6bits.T4IP = 7;
+
     // on 24 timer0 == TMR1 timer1 == TMR2
     //      1                  bit 15 TON: Timerx On bit
     //                          When T32 = 1 (in 32-bit Timer mode):
@@ -4053,17 +4045,6 @@ ALCFGRPT= 0b1100010000000000;
     //                     0   bit 0 Unimplemented: Read as æ0Æ
     T4CON=0b1000000000001000;
 
-    IFS1bits.T4IF = 0; // clean timer4 interrupt
-    //IEC1bits.T4IE = 1; // enable timer4 interrupt
-    IFS1bits.T5IF = 0; // clean timer4 interrupt
-    //IEC1bits.T5IE = 1; // enable timer4 interrupt
-
-//  timer 4 is 32 bit counter
-    PR4 = 0;//xffff;
-    TMR5HLD = 0;//xffff;
-    TMR4 = 0;//xffff;
-    
-    PR5 = 0x8000;//xffff;
     
   ////////////////////////////////////////////////////////////////////////////////
 
