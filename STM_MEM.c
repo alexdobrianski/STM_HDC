@@ -257,16 +257,17 @@ unsigned long Tmr4CountOld3;
 /////////////////////////////////////////////////////////////////////////////////////
 // synch clock/timer collection works that way:
 // 0. i.e. Unit = 2 
-// 1. send 2~=9?2
-//          ~        Ttilda recorded
-//           =9?     cmd set reply unit '9' and responce cmd '?'
-//             ?<------- Tdelta = Ttilda; TAfter recorded; responce send:
+// 1. send 2~=#9?2
+//         2        Ttilda recorded
+//          ~       Tdelta = Ttilda;
+//           = 9?     cmd set redirect to unit '9' rest of the packet
+//              ?<------- TAfter recorded; send responce as a command:
 //              9?<TDelta><TBefore=0><TUpload=0><TAfter>9 packet
 //
-// 2. send '~=5~'
-//          ~              Ttilda recorded
-//           =5~           cmd set reply unit '5' and responce cmd '~'
-//             ~<-------   Tdelat = Ttilda; TBefore recoreded; responce send
+// 2. send '2~=5~2'
+//          2              Ttilda recorded
+//           ~=5~          cmd set reply unit '5' and responce cmd '~' Tdelta = Ttilda;
+//              ~<-------   TBefore recoreded; responce send
 //              5~=2?5   - device '5' will respond with 2?<TDelta><TBefore=0><TUpload=0><TAfter>9 packet
 // from '5' ->        2?<TDelta><TBefore=0><TUpload=0><TAfter>9
 //                    2<---- Ttilda recorded
@@ -283,7 +284,6 @@ rtccTimeDate Rtcc;
 unsigned long Timer;
 unsigned long Second;
 } Ttilad;
-
 
 struct _Tdelta{
 rtccTimeDate Rtcc;
@@ -311,7 +311,7 @@ rtccTimeDate Rtcc;
 unsigned long Timer;
 unsigned long Second;
 } TAfter;
-#else
+#else // NOT __PIC24H__
 #ifdef _18F2321_18F25K20
 ////////////////////////////////////////////////////////////////////////////////////
 // for BT in mode ATDTEARTH on each interrupt of receved message on FQ1 TDelta stored
@@ -346,10 +346,10 @@ unsigned int Timer1;
 unsigned int Timer;
 } TTAfter;
 
-#endif
-#endif
+#endif // _18F2321_18F25K20
+#endif // __PIC24H__
 
-#endif
+#endif // SYNC_CLOCK_TIMER
 
 //#include "commc1.h"
 ///////////////////////////////////////////////////////////////////////
@@ -472,6 +472,7 @@ INTERRUPT int_server( void)
    unsigned char work2;
 #endif
 
+   //////////////////////////////////////////////////////////////////////////////////////////
    //////////////////////////////////////////////////////////////////////////////////////////
    IF_SSPIF    //if (SSPIF)    // I2C interrupt
    {
@@ -796,6 +797,7 @@ MAIN_EXIT:;
 #ifndef __PIC24H__
  #ifdef I2C_INT_SUPPORT
    /////////////////////////////////////////////////////////////////////////////////////////////////////
+   /////////////////////////////////////////////////////////////////////////////////////////////////////
    IF_BCLIF //if (BCLIF)
    {
        BCLIF = 0;
@@ -806,6 +808,7 @@ MAIN_EXIT:;
 #endif
 
 #ifdef __PIC24H__
+   //////////////////////////////////////////////////////////////////////////////////////////////////////
    //////////////////////////////////////////////////////////////////////////////////////////////////////
    IF_SLAVEI2C
    {
@@ -856,6 +859,7 @@ MAIN_EXIT:;
 #ifdef __PIC24H__
 #ifdef USE_COM2
    ///////////////////////////////////////////////////////////////////////////////////////////////////////
+   ///////////////////////////////////////////////////////////////////////////////////////////////////////
    IF_RCIFCOM2 //if (RCIF)
    {
 
@@ -879,6 +883,7 @@ MAIN_EXIT:;
         }
    }
    /////////////////////////////////////////////////////////////////////////////////////////////////
+   /////////////////////////////////////////////////////////////////////////////////////////////////
 // UART2 errors
    IF_RCERRORCOM2
    {
@@ -901,6 +906,7 @@ MAIN_EXIT:;
             bitclr(RCSTACOM2,1);
        }
    }
+   ///////////////////////////////////////////////////////////////////////////////////////////////////
    ///////////////////////////////////////////////////////////////////////////////////////////////////
    IF_TXIECOM2 //if (TXIE) // expecting interrupts
    {
@@ -934,6 +940,7 @@ MAIN_EXIT:;
 #endif // USE_COM2
 #endif //__PIC24H__
    ///////////////////////////////////////////////////////////////////////////////////
+   ///////////////////////////////////////////////////////////////////////////////////
    IF_RCIF //if (RCIF)
    {
 #ifdef __PIC24H__
@@ -960,18 +967,22 @@ MAIN_EXIT:;
                work2 = RCREG;
 #ifdef SYNC_CLOCK_TIMER
 
-               if (work2 == '~') // record time of received message
+               if (!Main.getCMD) // CMD not receved et.
                {
+                   if (work2 == MY_UNIT) // record time of received message
+                   {
 #ifdef __PIC24H__
-                   Tmr4Count =TMR4;
-                   Tmr4CountH = TMR5HLD;
-                   Ttilad.Timer = (((unsigned long)Tmr4CountH)<<16) | ((unsigned long)Tmr4Count);
-                   Ttilad.Second = Tmr4CountOld;
-                   RtccReadTimeDate(&Ttilad.Rtcc);
+                       Tmr4Count =TMR4;  // it is possible to count delays from interrupt to recorded time
+                       Tmr4CountH = TMR5HLD;
+                       Ttilad.Timer = (((unsigned long)Tmr4CountH)<<16) | ((unsigned long)Tmr4Count);
+                       Ttilad.Second = Tmr4CountOld;
+                       RtccReadTimeDate(&Ttilad.Rtcc);
 #else
+                       // for BT devicer
 #endif
-               }
-#endif
+                   }
+               }     
+#endif // SYNC_CLOCK_TIMER
 
 #ifdef __PIC24H__
                goto NO_RC_ERROR;
@@ -1247,6 +1258,7 @@ END_INPUT_COM:;
    }
 #ifdef __PIC24H__
     /////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////
 // UART errors
    IF_RCERRORCOM1
    {
@@ -1271,6 +1283,7 @@ END_INPUT_COM:;
    }
 #endif
 
+   ////////////////////////////////////////////////////////////////////////////////////////////
    ///////////////////////////////////////////////////////////////////////////////////////////
    IF_TXIE //if (TXIE) // expecting interrupts
    {
@@ -1363,6 +1376,7 @@ SPEED_TX:
        }
 CONTINUE_WITH_ISR:;
    }
+    /////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////
     IF_TIMER0_INT_FLG //if (TIMER0_INT_FLG) // can be transfer byte using TMR0
     {
@@ -1746,7 +1760,7 @@ TMR0_DONE:
 //    else 
 //NextCheckBit:
 
-
+    /////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////
     IF_TMR1IF //if (TMR1IF)  // update clock
     {
@@ -1848,7 +1862,7 @@ RE_READ_TMR1:
         }
         else if (TMR130 >TIMER1_ADJ0)
         {
-            RtccReadTimeDate(&RtccTimeDateVal);
+            //RtccReadTimeDate(&RtccTimeDateVal);
 TMR2_COUNT_DONE:
             TMR130 = 0;
             if (++TMR1SEC > 59)
@@ -1897,10 +1911,11 @@ TMR2_COUNT_DONE:
     }
 
 #ifdef RTCC_INT
-
+   ///////////////////////////////////////////////////////////////////////////////////////////////
+   //////////////////////////////////////////////////Real time clock & counter
+   ///////////////////////////////////////////////////////////////////////////////////////////////
    IF_RTCC
    {
-
        Tmr4Count =TMR4;
        Tmr4CountH = TMR5HLD;
 
@@ -1916,22 +1931,11 @@ TMR2_COUNT_DONE:
        RTTCCounts++;
        IFS3bits.RTCIF = 0;        
    }
-//    IF_TMR4IF
-//    {
-//        nop();
-//        nop();
-//        IFS1bits.T4IF = 0;
-//    }
-//
-//    IF_TMR5IF
-//    {
-//        nop();
-//        nop();
-//        IFS1bits.T5IF = 0;
-//    }
 #endif   
 
 #ifdef BT_TIMER3
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     IF_TMR3IF // RX timer
     {
         TMR3IF = 0;
@@ -2006,7 +2010,9 @@ TMR2_COUNT_DONE:
         
     }
 #endif
+
 #ifdef EXT_INT
+    /////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////////////
     IF_INT0_FLG //if (INT0_FLG)
     {
@@ -2191,6 +2197,7 @@ unsigned char getchI2C(void);
 void putch(unsigned char simbol);
 void putchWithESC(unsigned char simbol);
 unsigned char getch(void);
+
 #ifdef SSPORT
 void SendSSByte(unsigned char bByte);
 unsigned char GetSSByte(void);
@@ -2243,6 +2250,7 @@ void main()
         Main.CheckESC = 1;
 #endif
         RetransmitLen = 0;
+        Main.RetransmitTo = 0;
         //Main.SendWithEsc = 0;
         //Main.CommLoopOK = 0;
 
@@ -2288,13 +2296,24 @@ void main()
         Main.prepSkip = 0;
         Main.prepZeroLen = 0;
         UnitFrom = 0;
+#ifdef SYNC_CLOCK_TIMER
+#ifdef __PIC24H__
+        FSR_REGISTER = &Ttilad;
+        for (bWork = 0; bWork < 5*sizeof(Ttilad);bWork++)
+        {
+             PTR_FSR = 0;
+        }
+#else  // not __PIC24H__
+#endif // __PIC24H__
+#endif // SYNC_CLOCK_TIMER
+
 ///////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////
 // end COPY 6
 
 
-    }
+    //}
 #ifndef __PIC24H__
     PEIE = 1;    // bit 6 PEIE: Peripheral Interrupt Enable bit
                  // 1 = Enables all unmasked peripheral interrupts
@@ -2304,10 +2323,11 @@ void main()
                  // 0 = Disables all interrupts
     RBIF = 0;
 #endif
+
     ShowMessage();
 // for debug:
-            COM_to_GPS;
-            GPS_On;
+    COM_to_GPS;
+    GPS_On;
 
 //            CS_LOW;                 // open FLASH memory
 //            SendSSByte(0x03);       // "read FLASH memory"
@@ -2473,7 +2493,7 @@ REPEAT_OP1:
                                   goto PROCESS_IN_CMD;
                               }
                               AllowMask &= AllowOldMask;
-#else
+#else // NOT ALLOW_RELAY_TO_NEW
                               if (bWork == MY_UNIT) // unit matches
                               {
                                   Main.prepCmd = 1;
@@ -2483,7 +2503,7 @@ REPEAT_OP1:
                                   goto PROCESS_IN_CMD;
                               }
                               AllowMask =  0;
-#endif
+#endif // end ALLOW_RELAY_TO_NEW
                               // now needs to stream everything exsisting from input comm queue to output comm queue
                               putch(bWork);
                               getch();
@@ -2509,9 +2529,8 @@ REPEAT_OP1:
                  {
                      Monitor(bWork,MY_UNIT);
                  }
-#endif
+#endif // end NEW_CMD_PROC
 PROCESS_IN_CMD:
-
                  ProcessCMD(getch());
 NO_PROCESS_IN_CMD:;
             }
@@ -2522,7 +2541,7 @@ NO_PROCESS_IN_CMD:;
             {
                 //if (I2C_B1.I2CMasterDone) // no communication over I2C
 #ifdef __PIC24H__
-                //CLKDIVbits.DOZEN = 1; // switch clock from 40MOP=>1.25MOP
+                CLKDIVbits.DOZEN = 1; // switch clock from 40MOP=>1.25MOP
 #else
 #endif
             }
@@ -3217,6 +3236,34 @@ SKIP_ECHO_BYTE: ;
     }
     else    // now unit in command mode == processing all data
     {
+        if (Main.RetransmitTo) // command =X* was entered - all packet till end was retransmitted to different unit
+        {
+            if (Main.ESCNextByte)
+            {
+                Main.ESCNextByte = 0;
+                goto RETRANSMIT;
+            }
+            else
+            {
+                if (bByte == ESC_SYMB)
+                {
+                    I2C.LastWasUnitAddr = 0;
+RETRANSMIT:                    
+                    putch(bByte);
+                    return;
+                }
+                else if (bByte == UnitADR)
+                {
+                    if (I2C.LastWasUnitAddr)  // pakets can not travel with 0 length - it is definetly was a lost packet and
+                        goto RETRANSMIT;
+
+                     Main.RetransmitTo = 0;
+                     bByte = UnitFrom;
+                     goto RETRANSMIT;
+                }
+                goto RETRANSMIT;
+            }
+        } 
         // getCMD == 1 
         // stream addressing this unit
         if (Main.ESCNextByte)
@@ -3237,7 +3284,7 @@ SKIP_ECHO_BYTE: ;
             {
                 if (I2C.LastWasUnitAddr)  // pakets can not travel with 0 length - it is definetly was a lost packet and
                     return;           // needs to continue CMD mode  
-                
+
                 Main.getCMD = 0; // CMD stream done 
                 if (Main.PrepI2C) // execute I2C if CMD stream done 
                 {
@@ -3527,8 +3574,41 @@ DONE_WITH_FLASH:
             SendCMD = bByte;
             Main.SetSendCMD = 0;
             I2C.SetI2CYesNo = 1;
+            Main.DoneWithCMD = 1; // long command "=XC" done
+            if (bByte == '*')  // "=X*" and all data transfers to X till end of the packet
+            {
+                 //if (UnitFrom) // is it unit specified assuming that this is a 
+                 {
+                     putch(UnitFrom);putch(UnitFrom); // twice to avoid lost bytes
+                     Main.RetransmitTo = 1;
+                     return;
+                 }
+            }
+#ifdef SYNC_CLOCK_TIMER
+            if (bByte == '?')
+            {
+#ifdef __PIC24H__
+                Tmr4Count =TMR4;  // it is possible to count delays from interrupt to recorded time
+                Tmr4CountH = TMR5HLD;
+                TAfter.Timer = (((unsigned long)Tmr4CountH)<<16) | ((unsigned long)Tmr4Count);
+                TAfter.Second = Tmr4CountOld;
+                RtccReadTimeDate(&TAfter.Rtcc);
+                putch(UnitFrom);putch(UnitFrom);
+                FSR_REGISTER = &Tdelta;
+                Main.SendWithEsc = 1;
+                for (bWork = 0; bWork < 4*sizeof(Ttilad);bWork++)
+                {
+                    putchWithESC(PTR_FSR);FSR_REGISTER++;
+                }
+                Main.SendWithEsc = 0;
+#else  // not __PIC24H__
+#endif // __PIC24H__
+                return;
+            }
+#endif
+
 #ifdef RESPONCE_ON_EQ
-			if (UnitFrom) // basicall that is ACK
+			if (UnitFrom) // basically that is ACK
             {
             	putch(UnitFrom);
                 if (SendCMD)
@@ -3537,7 +3617,6 @@ DONE_WITH_FLASH:
                 putch(UnitFrom);
             }
 #endif
-            Main.DoneWithCMD = 1; // long command "=XC" done
             return;
         }
 #ifdef USE_OLD_CMD_EQ
@@ -3569,7 +3648,8 @@ DONE_WITH_FLASH:
             Main.DoneWithCMD = 1; // long command =XCI done
         }
 #endif
-        else if (bByte == '=') // new version "=XC" where X - unit to responce and C - one byte command to responce 
+        else if (bByte == '=') // new version   "=XC" where X - unit to responce and C - one byte command to responce 
+                               // if command is "=X*" than all packet till end has to be send over com to device X with closing packet byte (X at the end)
                                // old verion
                                // <unit>=XCI<unit> from unit = X, CMD to send =C (space = no CMD) I = expect retransmit over I2C
         {                      //  '=5CC' == to unit=5 with CMD=C over Type=C (Com) (operation SET)
@@ -3590,6 +3670,9 @@ DONE_WITH_FLASH:
         else if (bByte == '~') // reseved test message from itself
         {
             Main.CommLoopOK = 1;
+#ifdef SYNC_CLOCK_TIMER
+            memcpy(&Tdelta,&Ttilad,sizeof(Tdelta));
+#endif
         }
         else if (bByte == '<') // "<"<I2CAddr><DATA>@ or "<"<I2C addr><data><unit> 
         {                      // "<"<I2Caddr><data>">"L@   or "<"<I2Caddr><data>">"L<unit> 
