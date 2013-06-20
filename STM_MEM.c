@@ -196,8 +196,8 @@ see www.adobri.com for communication protocol spec
 #define SSDATA_OUT_READ RA2
 
 // this is for Cubesat version - 3 FLASH memory processing
-#define SSDATA_OUT2 LATA10
-#define SSDATA_OUT3 LATA7
+//#define SSDATA_OUT2 LATA10
+//#define SSDATA_OUT3 LATA7
 
 // dower down implementation if standbay current too big 
 //  8MB W25Q80         READ= 8ma, wtite =12ma, erase all= 20ma, standby=25mka, powerdown= 1mka
