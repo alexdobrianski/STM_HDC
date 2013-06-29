@@ -196,6 +196,7 @@ see www.adobri.com for communication protocol spec
 #define SSDATA_OUT_READ RA2
 
 // this is for Cubesat version - 3 FLASH memory processing
+//#define SSPORT2  LATAbits
 //#define SSDATA_OUT2 LATA10
 //#define SSDATA_OUT3 LATA7
 
@@ -4771,17 +4772,17 @@ unsigned char GetSSByte(void)
         bset(SSPORT,SSCLOCK);
         //nop();
         //bitclr(bWork2,0); // bWork2 is unsigned == zero in low bit garanteed check assembler code to confirm
-#undef SSDATA_OUT2
+//#undef SSDATA_OUT2
 #ifdef SSDATA_OUT2
-        if (btest(SSPORT_READ,SSDATA_OUT))
+        if (btest(SSPORT_READ2,SSDATA_OUT))
         {
-            if (btest(SSPORT_READ,SSDATA_OUT2))
+            if (btest(SSPORT_READ2,SSDATA_OUT2))
                 goto FLASH_MAJORITY;
-            else if (btest(SSPORT_READ,SSDATA_OUT3))
+            else if (btest(SSPORT_READ2,SSDATA_OUT3))
                 goto FLASH_MAJORITY;
         }
-        else if (btest(SSPORT_READ,SSDATA_OUT2))
-                 if (btest(SSPORT_READ,SSDATA_OUT3))
+        else if (btest(SSPORT_READ2,SSDATA_OUT2))
+                 if (btest(SSPORT_READ2,SSDATA_OUT3))
                  {
 FLASH_MAJORITY:
                      bitset(bWork2,0);
