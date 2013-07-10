@@ -73,6 +73,11 @@ see www.adobri.com for communication protocol spec
 // -g -Wall -save-temps -O1 -Wa,-ahlsnd="$(BINDIR_)$(INFILEBASE).lst"
 ////////////////////////////////////////////
 
+///////////////////////////////////////////////////////////////
+// disable I2C processing
+///////////////////////////////////////////////////////////////
+#define NO_I2C_PROC 1
+
 // it can be only master support: pic works in master mode only=> uncomment this line if 
 //     no multimaster support on a bus
 #define I2C_ONLY_MASTER 1
@@ -472,7 +477,7 @@ INTERRUPT int_server( void)
    unsigned char work1;
    unsigned char work2;
 #endif
-
+#ifndef NO_I2C_PROC
    //////////////////////////////////////////////////////////////////////////////////////////
    //////////////////////////////////////////////////////////////////////////////////////////
    IF_SSPIF    //if (SSPIF)    // I2C interrupt
@@ -665,10 +670,6 @@ ENFORCE_STOP:
 //CHECK_ANOTHER:
        if (S)  // this is a Start condition for I2C
        {
-           //dddddebug = ddddebug;
-           //ddddebug = dddebug;
-           //dddebug = ddebug;
-           //bitset(ddebug,0);
            I2C_B1.I2CBusBusy = 1;
            //S = 0;
            //bitset(PORTA,2);
@@ -680,11 +681,6 @@ ENFORCE_STOP:
            }
            if (I2C_B1.NeedRestart)
            {
-           //dddddebug = ddddebug;
-           //ddddebug = dddebug;
-           //dddebug = ddebug;
-           //bitset(ddebug,1);
-           //bitclr(ddebug,0);
                I2C_B1.NeedRestart = 0;
                I2C_B1.NeedReceive = 1;
                
@@ -695,11 +691,6 @@ ENFORCE_STOP:
            }
            if (I2C_B1.NeedMaster)
            {
-           //dddddebug = ddddebug;
-           //ddddebug = dddebug;
-           //dddebug = ddebug;
-           //ddebug = 1;
-           //bitset(ddebug,1);
                //I2C.I2CGettingPKG =1;  // blocking - anyway it will be some packege
                I2C_B1.NeedMaster = 0;
                if (AOutI2CQu.iQueueSize)  // in output Que there are something then it will be req Send first
@@ -722,10 +713,6 @@ SENTI2C_ADDR:
        }
        if (P)  // I2C bus is free
        {
-           //dddddebug = ddddebug;
-           //ddddebug = dddebug;
-           //dddebug = ddebug;
-           //ddebug = 0;
 #ifdef I2C_INT_SUPPORT
            if (I2C_B1.NeedStop) // needs to close MASTER mode and go back to SLAVE 
            {
@@ -856,7 +843,7 @@ MAIN_EXIT:;
 
    }
 #endif
-
+#endif //#ifndef NO_I2C_PROC
 #ifdef __PIC24H__
 #ifdef USE_COM2
    ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1802,7 +1789,7 @@ TMR0_DONE:
 #ifdef SHOW_RX_TX
    #ifdef SHOW_RX
    #else
-                       bitset(PORTA,7);
+                       DEBUG_LED_ON;
    #endif
 #endif
 
@@ -1812,7 +1799,7 @@ TMR0_DONE:
 #ifdef SHOW_RX_TX
    #ifdef SHOW_RX
    #else
-                       bitclr(PORTA,7);
+                      DEBUG_LED_OFF;
    #endif
 #endif
 
@@ -1872,7 +1859,7 @@ TMR2_COUNT_DONE:
                 if (++TMR1MIN > 59)
                 {
                     TMR1MIN = 0;
-                    RTTCCounts = 0;
+                    //RTTCCounts = 0;
                     if (++TMR1HOUR > 23)
                     {
                          TMR1HOUR = 0;
@@ -1929,7 +1916,7 @@ TMR2_COUNT_DONE:
        Tmr4CountOld2= Tmr4CountOld;
        Tmr4CountOld= (((unsigned long)Tmr4CountH)<<16) | ((unsigned long)Tmr4Count);
 
-       RTTCCounts++;
+       //RTTCCounts++;
        IFS3bits.RTCIF = 0;        
    }
 #endif   
@@ -1976,7 +1963,7 @@ TMR2_COUNT_DONE:
                                }
                         }
 #ifdef DEBUG_LED
-                        bitclr(PORTA,7);
+                       DEBUG_LED_OFF;
    #ifdef DEBUG_LED_CALL_LUNA
                         if (ATCMD & MODE_CONNECT)
                         {
@@ -2424,6 +2411,7 @@ REPEAT_OP1:
                 continue;
             }
 #endif
+#ifndef NO_I2C_PROC
             if (CallBkI2C())// 0 = do not process byte; 1 = process;
             {
                 bitclr(bWork,0);
@@ -2436,6 +2424,7 @@ REPEAT_OP1:
                     Main.getCMD = 1;
 
             }
+#endif
         }
         if (AInQu.iQueueSize)      // in comm queue bytes
         {
@@ -2553,7 +2542,6 @@ NO_PROCESS_IN_CMD:;
 ///////////////////////////////////////////////////////////////////////
 // end COPY 7
 ///////////////////////////////////////////////////////////////////////
-
 ///////////////////////////////////////////////////////////////////////
 
 } // at the end will be Sleep which then continue to main
@@ -2576,7 +2564,9 @@ void SendSSByteFAST(unsigned char bByte); // for a values <= 3
 
 
 void enable_uart(void);
+#ifndef NO_I2C_PROC
 void enable_I2C(void);
+#endif
 void EnableTMR1(void);
 void putch(unsigned char simbol)
 {
@@ -2709,7 +2699,7 @@ unsigned char getchCom2(void)
 
 #endif // __PIC24H_
 #endif // USE_COM2
-
+#ifndef NO_I2C_PROC
 void putchI2C(unsigned char simbol)
 {
     AOutI2CQu.Queue[AOutI2CQu.iEntry] = simbol; // add bytes to a queue
@@ -2717,7 +2707,7 @@ void putchI2C(unsigned char simbol)
         AOutI2CQu.iEntry = 0;
     AOutI2CQu.iQueueSize++;
 }
-
+#endif
 void putchWithESC(unsigned char simbol)
 {
     if (Main.SendWithEsc)
@@ -2785,6 +2775,7 @@ unsigned char getch(void)
     iInQuSize --;
     return bRet;
 }*/
+#ifndef NO_I2C_PROC
 unsigned char getchI2C(void)
 {
     unsigned char bRet = AInI2CQu.Queue[AInI2CQu.iExit];
@@ -2807,12 +2798,14 @@ void InsertI2C(unsigned char bWork)
 //bWork = 0;
 //    } 
 }
+#endif // #ifndef NO_I2C_PROC
 #pragma rambank RAM_BANK_1
 //////////////////////////////////////////////BANK 1///////////////////////////
 
 
 unsigned char eeprom_read(unsigned char addr);
 void eeprom_write(unsigned char addr, unsigned char value);
+ #ifndef NO_I2C_PROC
 /////////////////////////////////////////////////////////////////////
 //
 /////////////////////////////////////////////////////////////////////
@@ -3186,6 +3179,7 @@ void ReleseI2cMaster(void)
      //SSPEN = 1;
 }
 #endif //I2C_INT_SUPPORT
+#endif //  #ifndef NO_I2C_PROC
 //////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////
@@ -3287,14 +3281,17 @@ RETRANSMIT:
                     return;           // needs to continue CMD mode  
 
                 Main.getCMD = 0; // CMD stream done 
+#ifndef NO_I2C_PROC
                 if (Main.PrepI2C) // execute I2C if CMD stream done 
                 {
                     bByte = '@';
                     goto END_I2C_MSG_WAIT;
                 }
+#endif
             }
             I2C.LastWasUnitAddr = 0;
         }
+#ifndef NO_I2C_PROC
 //////////////////////////////////////////////////////////////////////////////////
 //  I2C command processing:
 //     "<"<I2CAddr><DATA>@ or "<"<I2C addr><data><unit> 
@@ -3409,6 +3406,7 @@ DONE_DONE_I2C:
             Main.DoneWithCMD = 1; // long command ends
             return;
         }  // end if a adressing I2C stream
+#endif
 //////////////////////////////////////////////////////////////////////////////
 // FLASH command processing
 // set by external comman like F
@@ -3672,8 +3670,13 @@ DONE_WITH_FLASH:
         {
             Main.CommLoopOK = 1;
 #ifdef SYNC_CLOCK_TIMER
+#ifdef __PIC24H__
             memcpy(&Tdelta,&Ttilad,sizeof(Tdelta));
-#endif
+#else
+#ifdef      _18F2321_18F25K20
+#endif 
+#endif // __PIC24H__
+#endif // SYNC_CLOCK_TIMER
         }
         else if (bByte == '<') // "<"<I2CAddr><DATA>@ or "<"<I2C addr><data><unit> 
         {                      // "<"<I2Caddr><data>">"L@   or "<"<I2Caddr><data>">"L<unit> 
@@ -3814,10 +3817,12 @@ unsigned char CallBkComm(void) // return 1 == process queue; 0 == do not process
     //}
     return 1; // this will process next byte 
 }
+#ifndef NO_I2C_PROC
 unsigned char CallBkI2C(void)
 {
     return 1;
 }
+#endif
 unsigned char CallBkMain(void) // 0 = do continue; 1 = process queues
 {
     //if (Timer0Waiting)
@@ -4182,6 +4187,7 @@ void ShowMessage(void)
 /////////////////////////////////////////////////////////////////
 
 #ifndef __PIC24H__
+#ifndef _16F724
 // EECON1
 //        bit 7 EEPGD: Flash Program or Data EEPROM Memory Select bit
 //            1 = Access Flash program memory
@@ -4240,6 +4246,7 @@ void eeprom_write(unsigned char addr, unsigned char value)
     {
     }
 }
+#endif
 #endif
 
 void enable_uart(void)//bit want_ints)
@@ -4490,6 +4497,7 @@ void enable_uart(void)//bit want_ints)
     //WREN = 1;
 #endif
 }    
+#ifndef NO_I2C_PROC
 void enable_I2C(void)
 {
 #ifdef __PIC24H__
@@ -4589,6 +4597,7 @@ void enable_I2C(void)
     //SSPOV = 0;  // clean owerflow
 #endif
 }
+#endif
 void EnableTMR1(void)
 {
 #ifdef __PIC24H__
