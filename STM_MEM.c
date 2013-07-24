@@ -60,6 +60,16 @@ see www.adobri.com for communication protocol spec
 #define _18F25K20 1
 #endif
 
+// will be responce on command "=<unit><cmd>"
+#define RESPONCE_ON_EQ
+
+// CMD switch processed in interrupt
+#define NEW_CMD_PROC 1
+
+// sync clock / timeral  support
+#define SYNC_CLOCK_TIMER  
+
+
 ////////////////////////////////////////////
 // listing in C30
 // -Wa,-ahlsnd="$(BINDIR_)$(INFILEBASE).lst"
@@ -996,9 +1006,10 @@ NO_RC_ERROR:
 #ifdef NEW_CMD_PROC
                // optimized version
                
-               if (Main.prepSkip)     // was skip = retransmit byte - top priority
+
+               if (Main.prepESC)     // was skip = retransmit byte - top priority
                {
-                   Main.prepSkip = 0;
+                   Main.prepESC = 0;
                    Main.prepZeroLen = 0;
                    goto RELAY_SYMB; // ===> retransmit
                }
@@ -1007,8 +1018,16 @@ NO_RC_ERROR:
                    if (work2 == ESC_SYMB) // do relay but account that is was ESC char 
                    {
                        Main.prepZeroLen = 0;
-                       Main.prepSkip = 1;//====> retransmit
+                       Main.prepESC = 1;//====> retransmit
 RELAY_SYMB:
+                       if (Main.LockToQueue)
+                           goto INSERT_TO_COM_Q;
+
+                       if (Main.OutPacket) // serial output busy only way is for any data is via input queue
+                       {
+                           Main.LockToQueue =1;
+                           goto INSERT_TO_COM_Q;
+                       } 
                        // exact copy from putchar == it is big!!! but it can be called recursivly!!
                        ///////////////////////////////////////////////////////////////////////////////////////
                        // direct output to com1
@@ -1066,6 +1085,7 @@ SEND_BYTE_TO_QU:
                        if (Main.prepZeroLen) // packets with 0 length does not exsists
                            goto RELAY_SYMB; // ===> retransmit
                        RetrUnit = 0;
+                       Main.SomePacket = 0;
                        goto RELAY_SYMB; // ===> retransmit
                    }
                    else if (work2 == MY_UNIT)
@@ -1082,75 +1102,86 @@ SEND_BYTE_TO_QU:
                    Main.prepZeroLen = 0;
                    goto RELAY_SYMB; // ===> retransmit
                }
-               else if (Main.getCMD)
+               else if (Main.CMDProcess)
                {
-                   if (Main.CheckESC)
+                   if (Main.CMDProcessCheckESC)
                    {
-                      Main.CheckESC = 0;  // =======> process message => insert in queue
+                      Main.CMDProcessCheckESC = 0;  // =======> process message => insert in queue
                    }
                    else if (work2 == ESC_SYMB)
                    {
-                        Main.CheckESC = 1;
+                        Main.CMDProcessCheckESC = 1;
                    }
                    else if (work2 == MY_UNIT)
-                      ; // =======> process message => insert in queue
-                   else if (work2 <= MAX_ADR)
+                   {
+                      Main.CMDProcess = 0;
+                      ; // =======> process last byte => insert in queue = but packet done
+                   }
+                   else if (work2 <= MAX_ADR) // if inside packet present another one == send it to loop
                    {            
-                       if (work2 >= MIN_ADR) // msg to relay
+                       if (work2 >= MIN_ADR) // packet to relay
                           // retransmit to another unit has a priority - current status freazed
                            goto TO_ANOTHER_UNIT;
                    }         
                    ;  // =======> process message => insert in queue
                }
-               else // not a command mode == stream mode 
-               if (work2 == ESC_SYMB) // do relay
-               {
-                   Main.prepZeroLen = 0;
-                   Main.prepSkip = 1;//====> retransmit
-                   goto RELAY_SYMB; // ===> retransmit
-               }
-               else if (work2 == MY_UNIT) // message addresed to a unit
-               {
-SET_MY_UNIT:
-                   Main.getCMD =1; // byte eated
-                   I2C.LastWasUnitAddr = 1;
-                   Main.CheckESC = 0;
-                   Main.ESCNextByte = 0;
-                   goto END_INPUT_COM;
-               }
-               else
-               {
-                   if (work2 <= MAX_ADR)
-                   {            
-                       if (work2 >= MIN_ADR) // msg to relay to another untis
-                       {
-TO_ANOTHER_UNIT:          
-                           RetrUnit = work2;
-                           Main.prepZeroLen = 1;
-                           Main.prepSkip = 0;
-                       }
+               else // not a command mode == stream mode
+               { 
+                   if (work2 == ESC_SYMB) // do relay
+                   {
+                       Main.prepZeroLen = 0;
+                       Main.prepESC = 1;//====> retransmit
+                       goto RELAY_SYMB; // ===> retransmit
                    }
-                   goto RELAY_SYMB; // ===> retransmit
-               }
+                   else if (work2 == MY_UNIT) // packet addresed to a unit
+                   {
+SET_MY_UNIT:
+                       Main.CMDProcess = 1;
+                       Main.CMDProcessCheckESC = 0;
+                       //Main.CMDProcessLastWasUnitAddr = 1;
+                       Main.getCMD =1; // byte eated
+                       Main.LastWasUnitAddr = 1;
+                       Main.ESCNextByte = 0;
+                       goto END_INPUT_COM;
+                   }
+                   else
+                   {
+                       if (work2 <= MAX_ADR)
+                       {            
+                           if (work2 >= MIN_ADR) // packet to relay to another untis
+                           {
+TO_ANOTHER_UNIT:               //if (Main.OutPacket)  // if packet alreadi in serial output then input stream has to be processed via queue
+                               //{
+                               //    goto INSERT_TO_COM_Q;
+                               //}
+                               Main.SomePacket = 1;
+                               RetrUnit = work2;
+                               Main.prepZeroLen = 1;
+                               Main.prepESC = 0;
+                           }
+                       }
+                       goto RELAY_SYMB; // ===> retransmit
+                   }
+               }    
 //////////////////////////////////////////////////////////////////
 // end of optimized version
 //////////////////////////////////////////////////////////////////
-#else
+#else //  NOT NEW_CMD_PROC
                if (RetrUnit) // relay data to next unit during processing streaming == stream to another unit retransmit directly without entering queue
                {
                    if (Main.prepStream)
                    {
                       
-                       if (Main.prepSkip)     // was skip = clean and relay
+                       if (Main.prepESC)     // was skip = clean and relay
                        {
-                           Main.prepSkip = 0;
+                           Main.prepESC = 0;
                            Main.prepZeroLen = 0;
                            goto RELAY_SYMB; // ===> retransmit
                        }
                        else if (work2 == ESC_SYMB) // do relay
                        {
                            Main.prepZeroLen = 0;
-                           Main.prepSkip = 1;//====> retransmit
+                           Main.prepESC = 1;//====> retransmit
 RELAY_SYMB:
                            // exact copy from putchar == it is big!!! but it can be called recursivly!!
                            ///////////////////////////////////////////////////////////////////////////////////////
@@ -1226,7 +1257,7 @@ SEND_BYTE_TO_QU:
                    }
                    // ===> process simbol
                }
-#endif
+#endif   //  end NEW_CMD_PROC
 INSERT_TO_COM_Q:
                if (AInQu.iQueueSize < BUFFER_LEN)
                {
@@ -2135,14 +2166,14 @@ MAIN_EXIT:
 #else
 unsigned char Monitor(unsigned char bWork, unsigned char CheckUnit)
 {
-    if (Main.prepSkip)
+    if (Main.prepESC)
     {
         Main.prepZeroLen = 0;
-        Main.prepSkip = 0;
+        Main.prepESC = 0;
     }
     else if (bWork == ESC_SYMB) // it is ESC char ??
     {
-        Main.prepSkip = 1;
+        Main.prepESC = 1;
         Main.prepZeroLen = 0;
     }
     else if (bWork == CheckUnit) // 
@@ -2214,7 +2245,7 @@ void main()
 		AOutQu.iEntry = 0;
         AOutQu.iExit = 0;
 		AOutQu.iQueueSize = 0;
-
+#ifndef NO_I2C_PROC
         AInI2CQu.iEntry = 0;
         AInI2CQu.iExit = 0;
 		AInI2CQu.iQueueSize = 0;
@@ -2222,6 +2253,7 @@ void main()
 		AOutI2CQu.iEntry = 0;
         AOutI2CQu.iExit = 0;
 		AOutI2CQu.iQueueSize = 0;
+#endif
         //TimerB1=0;
 #ifdef BT_TIMER1
 #else
@@ -2229,18 +2261,38 @@ void main()
         TimerB1.SetSyncTime = 0;
 #endif
 
-        //Main= 0;
+        //Main = 0;
         Main.getCMD = 0;
         Main.ESCNextByte = 0;
+        Main.CMDProcess = 0;
+        Main.CMDProcessCheckESC = 0;
+
         Main.PrepI2C = 0;
         Main.DoneWithCMD = 1;
-#ifdef NEW_CMD_PROC
-        Main.CheckESC = 1;
-#endif
-        RetransmitLen = 0;
+
+        Main.prepStream = 1;
+        Main.prepCmd = 0;
+        Main.prepESC = 0;
+        Main.prepZeroLen = 0;
+
+        Main.SomePacket = 0;
+        Main.OutPacket = 0;
+        Main.OutPacketESC = 0;
+        Main.OutPacketZeroLen = 0;
+        Main.LockToQueue = 0;
+
         Main.RetransmitTo = 0;
+#ifdef NON_STANDART_MODEM
+        Main.SendOverLink = 0;
+#endif
         //Main.SendWithEsc = 0;
         //Main.CommLoopOK = 0;
+        Main.LastWasUnitAddr = 0;
+
+
+#ifdef USE_OLD_CMD_EQ
+        RetransmitLen = 0;
+#endif
 
         SSPADD = UnitADR<<1;
         I2C.LockToI2C = 0;
@@ -2252,7 +2304,6 @@ void main()
         //BlockComm = 0;
 
         I2C.Timer0Fired = 0;
-        I2C.LastWasUnitAddr = 0;
 #ifdef SPEED_SEND_DATA
         Speed.SpeedSend = 0;
         Speed.SpeedSendLocked = 0;
@@ -2279,10 +2330,6 @@ void main()
 #endif
         UnitMask1 = 0xff;
         UnitMask2 = 0;
-        Main.prepStream = 1;
-        Main.prepCmd = 0;
-        Main.prepSkip = 0;
-        Main.prepZeroLen = 0;
         UnitFrom = 0;
 #ifdef SYNC_CLOCK_TIMER
 #ifdef __PIC24H__
@@ -2382,6 +2429,7 @@ void main()
     {
         if (CallBkMain() == 0) // 0 = do continue; 1 = process queues
             continue;
+#ifndef NO_I2C_PROC
         if (AInI2CQu.iQueueSize) // if something comes from I2C (slave received or some I2c device responded on read command)
         {
 #ifdef USE_OLD_CMD_EQ
@@ -2426,6 +2474,7 @@ REPEAT_OP1:
             }
 #endif
         }
+#endif // #ifndef NO_I2C_PROC
         if (AInQu.iQueueSize)      // in comm queue bytes
         {
             //if (RetransmitLen)
@@ -2442,10 +2491,10 @@ REPEAT_OP1:
                  bWork = AInQu.Queue[AInQu.iExit]; // next char
                  if (Main.prepStream)
                  {
-                     if (Main.prepSkip)
-                         Main.prepSkip = 0;
+                     if (Main.prepESC)
+                         Main.prepESC = 0;
                      else if (bWork == ESC_SYMB) // it is ESC char ??
-                         Main.prepSkip = 1;
+                         Main.prepESC = 1;
                      else if (bWork <= MAX_ADR)
                      {
                           if (bWork >= MIN_ADR) // msg to relay
@@ -2527,7 +2576,9 @@ NO_PROCESS_IN_CMD:;
         }
         else  // nothing in both queue can sleep till interrupt
         {
+#ifndef NO_I2C_PROC
             if (AInI2CQu.iQueueSize == 0)
+#endif
             {
                 //if (I2C_B1.I2CMasterDone) // no communication over I2C
 #ifdef __PIC24H__
@@ -2541,7 +2592,6 @@ NO_PROCESS_IN_CMD:;
 ///////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////
 // end COPY 7
-///////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////
 
 } // at the end will be Sleep which then continue to main
@@ -2570,6 +2620,38 @@ void enable_I2C(void);
 void EnableTMR1(void);
 void putch(unsigned char simbol)
 {
+    while(Main.SomePacket) // wait to output to be clean == no packet in serial output
+    ;
+    // monitor output packets and set Main.OutPacket accordinly
+    if (Main.OutPacketESC)
+        Main.OutPacketESC =0;
+    else if (simbol == ESC_SYMB)
+        Main.OutPacketESC = 1;
+    else 
+    {
+        if (Main.OutPacket)
+        {
+            if (simbol == OutPacketUnit)
+            {
+                if (!Main.OutPacketZeroLen)
+                    Main.OutPacket = 0;
+            }
+            else
+                Main.OutPacketZeroLen = 0;
+        }
+        else
+        {
+            if (simbol <= MAX_ADR)
+            {
+                if (simbol  >= MIN_ADR)
+                {
+                    Main.OutPacket = 1;
+                    Main.OutPacketZeroLen = 1;
+                    OutPacketUnit = simbol; 
+                }
+            }
+        }
+    }
     if (AOutQu.iQueueSize == 0)  // if this is a com and queue is empty then needs to directly send byte(s) 
     {                            // on 16LH88,16F884,18F2321 = two bytes on pic24 = 4 bytes
         // at that point Uart interrupt is disabled
@@ -3186,6 +3268,7 @@ void ReleseI2cMaster(void)
 // end COPY 2
 //////////////////////////////////////////////////////////////////////
 
+
 // additional code:
 void ProcessCMD(unsigned char bByte)
 {
@@ -3203,8 +3286,6 @@ void ProcessCMD(unsigned char bByte)
 /////////////////////////////////////////////////////////////////////
     //if (!Main.getCMD) // outside of the include was if == unit in "stream" relay mode
     //{
-#ifdef NEW_CMD_PROC
-#else
         // getCMD == 0
         // in stream was ESC char and now needs to echo that char to loop
         if (Main.ESCNextByte)
@@ -3212,13 +3293,14 @@ void ProcessCMD(unsigned char bByte)
         else
         {  
             // if this is addressed to this unit then process it and switch "stream" -> "command" mode
-            if (bByte == UnitADR)
+            if (bByte == MY_UNIT)
             {
                 Main.getCMD = 1; //next will be: <CMD>
                 Main.SetFromAddr = 0;
                 Main.SetSendCMD = 0;
                 I2C.ESCI2CChar = 0;
-                I2C.LastWasUnitAddr = 1;
+                Main.LastWasUnitAddr = 1;
+                Main.LockToQueue =0; //that will allow to switch back ability to retansmit
                 return;
             }
             else if (bByte == ESC_SYMB)   // ESC char - needs to echo next simbol to loop
@@ -3226,11 +3308,11 @@ void ProcessCMD(unsigned char bByte)
         }
         // relay char to the loop, bcs now it is "stream" mode      
         putch(bByte); //ok
-#endif
 SKIP_ECHO_BYTE: ;
     }
     else    // now unit in command mode == processing all data
     {
+
         if (Main.RetransmitTo) // command =X* was entered - all packet till end was retransmitted to different unit
         {
             if (Main.ESCNextByte)
@@ -3242,14 +3324,14 @@ SKIP_ECHO_BYTE: ;
             {
                 if (bByte == ESC_SYMB)
                 {
-                    I2C.LastWasUnitAddr = 0;
+                    Main.LastWasUnitAddr = 0;
 RETRANSMIT:                    
                     putch(bByte);
                     return;
                 }
-                else if (bByte == UnitADR)
+                else if (bByte == MY_UNIT)
                 {
-                    if (I2C.LastWasUnitAddr)  // pakets can not travel with 0 length - it is definetly was a lost packet and
+                    if (Main.LastWasUnitAddr)  // pakets can not travel with 0 length - it is definetly was a lost packet and
                         goto RETRANSMIT;
 
                      Main.RetransmitTo = 0;
@@ -3258,7 +3340,8 @@ RETRANSMIT:
                 }
                 goto RETRANSMIT;
             }
-        } 
+        }
+ 
         // getCMD == 1 
         // stream addressing this unit
         if (Main.ESCNextByte)
@@ -3267,7 +3350,7 @@ RETRANSMIT:
         {
             if (bByte == ESC_SYMB)
             {
-                I2C.LastWasUnitAddr = 0;
+                Main.LastWasUnitAddr = 0;
                 if (!Main.PrepI2C)
                     Main.ESCNextByte = 1;
                 else
@@ -3275,9 +3358,9 @@ RETRANSMIT:
              
                 return;
             }
-            else if (bByte == UnitADR)
+            else if (bByte == MY_UNIT)
             {
-                if (I2C.LastWasUnitAddr)  // pakets can not travel with 0 length - it is definetly was a lost packet and
+                if (Main.LastWasUnitAddr)  // pakets can not travel with 0 length - it is definetly was a lost packet and
                     return;           // needs to continue CMD mode  
 
                 Main.getCMD = 0; // CMD stream done 
@@ -3289,7 +3372,7 @@ RETRANSMIT:
                 }
 #endif
             }
-            I2C.LastWasUnitAddr = 0;
+            Main.LastWasUnitAddr = 0;
         }
 #ifndef NO_I2C_PROC
 //////////////////////////////////////////////////////////////////////////////////
@@ -3483,6 +3566,7 @@ DONE_DONE_I2C:
 DONE_WITH_FLASH:
                 DataB3.FlashCmd = 0;
                 CS_HIGH;
+#ifndef NO_I2C_PROC
                 if (!Main.ComNotI2C) // CMD comes from I2C - reply from read should goes back to I2C
                 {
                      // initiate send using I2C
@@ -3493,6 +3577,7 @@ DONE_WITH_FLASH:
                     //if (UnitFrom)
                     //    putch(UnitFrom);
                 }
+#endif
                 Main.DoneWithCMD = 1; // long command flash manipulation done 
             }
             return;
@@ -3550,6 +3635,7 @@ DONE_WITH_FLASH:
         {                     //       |         if ' ' than responce unit is not set
             if (bByte == ' ')
                 bByte = 0;
+#ifdef USE_OLD_CMD_EQ
             if (bByte == '*') // this will switch stream permanently
             {
                 return;
@@ -3561,9 +3647,11 @@ DONE_WITH_FLASH:
                  Main.DoneWithCMD = 0;
                  return;
             }
+#endif
             UnitFrom = bByte;
             Main.SetFromAddr = 0;
             Main.SetSendCMD = 1;
+
             return;
         }
         else if (Main.SetSendCMD) //<unit>=xC                 ///<unit>=xCi<unit> 
@@ -3574,9 +3662,10 @@ DONE_WITH_FLASH:
             Main.SetSendCMD = 0;
             I2C.SetI2CYesNo = 1;
             Main.DoneWithCMD = 1; // long command "=XC" done
+
             if (bByte == '*')  // "=X*" and all data transfers to X till end of the packet
             {
-                 //if (UnitFrom) // is it unit specified assuming that this is a 
+                 //if (UnitFrom) // assuming that unit was specified 
                  {
                      putch(UnitFrom);putch(UnitFrom); // twice to avoid lost bytes
                      Main.RetransmitTo = 1;
@@ -3599,12 +3688,13 @@ DONE_WITH_FLASH:
                 {
                     putchWithESC(PTR_FSR);FSR_REGISTER++;
                 }
+                putch(UnitFrom); // close packet
                 Main.SendWithEsc = 0;
 #else  // not __PIC24H__
 #endif // __PIC24H__
                 return;
             }
-#endif
+#endif // SYNC_CLOCK_TIMER
 
 #ifdef RESPONCE_ON_EQ
 			if (UnitFrom) // basically that is ACK
@@ -3649,6 +3739,7 @@ DONE_WITH_FLASH:
 #endif
         else if (bByte == '=') // new version   "=XC" where X - unit to responce and C - one byte command to responce 
                                // if command is "=X*" than all packet till end has to be send over com to device X with closing packet byte (X at the end)
+                               
                                // old verion
                                // <unit>=XCI<unit> from unit = X, CMD to send =C (space = no CMD) I = expect retransmit over I2C
         {                      //  '=5CC' == to unit=5 with CMD=C over Type=C (Com) (operation SET)
@@ -3678,6 +3769,16 @@ DONE_WITH_FLASH:
 #endif // __PIC24H__
 #endif // SYNC_CLOCK_TIMER
         }
+#ifdef NON_STANDART_MODEM
+        else if (bByte == '*')
+        {
+            if (ATCMD & MODE_CONNECT) // was connection esatblished?
+            {
+                 Main.SendOverLink = 1;
+            }
+        }
+#endif
+#ifndef NO_I2C_PROC
         else if (bByte == '<') // "<"<I2CAddr><DATA>@ or "<"<I2C addr><data><unit> 
         {                      // "<"<I2Caddr><data>">"L@   or "<"<I2Caddr><data>">"L<unit> 
                                // where L is a length data to read
@@ -3696,6 +3797,7 @@ DONE_WITH_FLASH:
             I2C.WaitQuToEmp =  1;
             I2C.NextI2CRead = 1;
         }
+#endif // NO_I2C_PROC
 #ifdef SSPORT
         else if (bByte == 'F') // manipulation with FLASH memory: read/write/erase/any flash command
         {
@@ -4783,15 +4885,16 @@ unsigned char GetSSByte(void)
         //bitclr(bWork2,0); // bWork2 is unsigned == zero in low bit garanteed check assembler code to confirm
 //#undef SSDATA_OUT2
 #ifdef SSDATA_OUT2
-        if (btest(SSPORT_READ2,SSDATA_OUT))
+
+        if (btest(SSPORT_READ,SSDATA_OUT))
         {
-            if (btest(SSPORT_READ2,SSDATA_OUT2))
+            if (btest(SSPORT2,SSDATA_OUT2))
                 goto FLASH_MAJORITY;
-            else if (btest(SSPORT_READ2,SSDATA_OUT3))
+            else if (btest(SSPORT2,SSDATA_OUT3))
                 goto FLASH_MAJORITY;
         }
-        else if (btest(SSPORT_READ2,SSDATA_OUT2))
-                 if (btest(SSPORT_READ2,SSDATA_OUT3))
+        else if (btest(SSPORT2,SSDATA_OUT2))
+                 if (btest(SSPORT2,SSDATA_OUT3))
                  {
 FLASH_MAJORITY:
                      bitset(bWork2,0);

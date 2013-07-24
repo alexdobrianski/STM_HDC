@@ -5,8 +5,6 @@
 /////////////////////////////////////////////////////////////////////
     //if (!Main.getCMD) // outside of the include was if == unit in "stream" relay mode
     //{
-#ifdef NEW_CMD_PROC
-#else
         // getCMD == 0
         // in stream was ESC char and now needs to echo that char to loop
         if (Main.ESCNextByte)
@@ -14,13 +12,14 @@
         else
         {  
             // if this is addressed to this unit then process it and switch "stream" -> "command" mode
-            if (bByte == UnitADR)
+            if (bByte == MY_UNIT)
             {
                 Main.getCMD = 1; //next will be: <CMD>
                 Main.SetFromAddr = 0;
                 Main.SetSendCMD = 0;
                 I2C.ESCI2CChar = 0;
-                I2C.LastWasUnitAddr = 1;
+                Main.LastWasUnitAddr = 1;
+                Main.LockToQueue =0; //that will allow to switch back ability to retansmit
                 return;
             }
             else if (bByte == ESC_SYMB)   // ESC char - needs to echo next simbol to loop
@@ -28,11 +27,11 @@
         }
         // relay char to the loop, bcs now it is "stream" mode      
         putch(bByte); //ok
-#endif
 SKIP_ECHO_BYTE: ;
     }
     else    // now unit in command mode == processing all data
     {
+
         if (Main.RetransmitTo) // command =X* was entered - all packet till end was retransmitted to different unit
         {
             if (Main.ESCNextByte)
@@ -44,14 +43,14 @@ SKIP_ECHO_BYTE: ;
             {
                 if (bByte == ESC_SYMB)
                 {
-                    I2C.LastWasUnitAddr = 0;
+                    Main.LastWasUnitAddr = 0;
 RETRANSMIT:                    
                     putch(bByte);
                     return;
                 }
-                else if (bByte == UnitADR)
+                else if (bByte == MY_UNIT)
                 {
-                    if (I2C.LastWasUnitAddr)  // pakets can not travel with 0 length - it is definetly was a lost packet and
+                    if (Main.LastWasUnitAddr)  // pakets can not travel with 0 length - it is definetly was a lost packet and
                         goto RETRANSMIT;
 
                      Main.RetransmitTo = 0;
@@ -60,7 +59,8 @@ RETRANSMIT:
                 }
                 goto RETRANSMIT;
             }
-        } 
+        }
+ 
         // getCMD == 1 
         // stream addressing this unit
         if (Main.ESCNextByte)
@@ -69,7 +69,7 @@ RETRANSMIT:
         {
             if (bByte == ESC_SYMB)
             {
-                I2C.LastWasUnitAddr = 0;
+                Main.LastWasUnitAddr = 0;
                 if (!Main.PrepI2C)
                     Main.ESCNextByte = 1;
                 else
@@ -77,9 +77,9 @@ RETRANSMIT:
              
                 return;
             }
-            else if (bByte == UnitADR)
+            else if (bByte == MY_UNIT)
             {
-                if (I2C.LastWasUnitAddr)  // pakets can not travel with 0 length - it is definetly was a lost packet and
+                if (Main.LastWasUnitAddr)  // pakets can not travel with 0 length - it is definetly was a lost packet and
                     return;           // needs to continue CMD mode  
 
                 Main.getCMD = 0; // CMD stream done 
@@ -91,7 +91,7 @@ RETRANSMIT:
                 }
 #endif
             }
-            I2C.LastWasUnitAddr = 0;
+            Main.LastWasUnitAddr = 0;
         }
 #ifndef NO_I2C_PROC
 //////////////////////////////////////////////////////////////////////////////////

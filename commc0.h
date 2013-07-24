@@ -1696,7 +1696,6 @@ void CsHigh(void);
 //
 //////////////////////////////////////////////////////////////////////////////////////////
 
-#define Clock_8MHz
       
 #define bitset(i,j) i |= 1U << j
 #define bitclr(i,j) i &= ~(1U << j)
@@ -1704,18 +1703,6 @@ void CsHigh(void);
 #define bset(i,j) i.j=1
 #define bclr(i,j) i.j=0
 #define btest(i,j) (i.j)
-
-//#ifdef __PIC24H__
-//#define bitset(i,j) i |= (1U << j)
-//#define bitclr(i,j) i &= ~(1U << j)
-//#define bittest(i,j) (i & (1U<<j))
-
-//#define bset(i,j) i.j=1
-//#define bclr(i,j) i.j=0
-//#define btest(i,j) (i.j)
-
-
-//#endif
 
 #pragma rambank RAM_BANK_2
 ///////////////////////////////////////BANK 2//////////////////////
@@ -1799,30 +1786,43 @@ VOLATILE struct BQueue AOutQuCom2;
 unsigned char UnitADR;
 unsigned char UnitFrom;
 unsigned char SendCMD;
+#ifdef USE_OLD_CMD_EQ
 unsigned char RetransmitLen;
+#endif
 struct _MainB2{
 unsigned RetransmitTo:1;
 #ifdef NON_STANDART_MODEM
 unsigned SendOverLink:1;
 #endif
+VOLATILE unsigned SomePacket:1;
+VOLATILE unsigned OutPacket:1;
+VOLATILE unsigned OutPacketESC:1;
+VOLATILE unsigned OutPacketZeroLen:1;
+
+VOLATILE unsigned CMDProcess:1;
+VOLATILE unsigned CMDProcessCheckESC:1;
+VOLATILE unsigned CMDProcessLastWasUnitAddr:1;
 unsigned getCMD:1;
-unsigned getHbit:1;
 unsigned ESCNextByte:1;
+unsigned LastWasUnitAddr:1;
+VOLATILE unsigned LockToQueue:1;
 unsigned PrepI2C:1;
+unsigned CommLoopOK:1;
 unsigned SetFromAddr:1;
 unsigned SetSendCMD:1;
 unsigned SendWithEsc:1;
 #ifdef USE_COM2
 unsigned SendCom2WithEsc:1;
 #endif
-unsigned CommLoopOK:1;
 
 unsigned DoneWithCMD:1;
+#ifndef NO_I2C_PROC
 unsigned ComNotI2C:1;
+#endif
 
 VOLATILE unsigned prepStream:1;
 VOLATILE unsigned prepCmd:1;
-VOLATILE unsigned prepSkip:1;
+VOLATILE unsigned prepESC:1;
 VOLATILE unsigned prepZeroLen:1;
 #ifdef EXT_INT
 VOLATILE unsigned ExtInterrupt:1;
@@ -1831,10 +1831,9 @@ VOLATILE unsigned ExtInterrupt2:1;
 VOLATILE unsigned InDoneNoSleep:1;
 VOLATILE unsigned ExtFirst:1;
 #endif
-#ifdef NEW_CMD_PROC
-VOLATILE unsigned CheckESC:1;
-#endif
 } Main;
+
+VOLATILE unsigned char OutPacketUnit;
 VOLATILE unsigned char RetrUnit;
 VOLATILE unsigned char AllowMask;
 VOLATILE unsigned char UnitMask1;
@@ -1869,7 +1868,7 @@ VOLATILE unsigned I2CGettingPKG:1;
 unsigned I2CReplyExpected:1;
 unsigned RetransI2ComCSet:1;
 unsigned Timer0Fired:1;
-unsigned LastWasUnitAddr:1;
+
 unsigned SendComOneByte:1;
 
 unsigned AddresWasSend:1;
@@ -1891,9 +1890,11 @@ unsigned SendACK_NAK:1;
 VOLATILE unsigned I2CMasterDone:1;
 } I2C_B1;
 
+#ifndef NO_I2C_PROC
 unsigned char I2Caddr;
 VOLATILE struct AQueue AInI2CQu;
 VOLATILE struct BQueue AOutI2CQu;
+#endif
 
 #ifdef SPEED_SEND_DATA
 #pragma rambank SPEED_SEND_DATA
