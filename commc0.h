@@ -2,7 +2,16 @@
 ///////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////
 // begin of COPY 0
+//
+// Initialization of variables for different processors. 
+// Utilizing __PIC24H__
+// Other processors:
+// 		_18F2321
+// 		_18F25K20
+// 		_16F884
+// 		_16F724
 ///////////////////////////////////////////////////////////////////////
+
 #ifdef _18F2321
 #define _18F2321_18F25K20
 #endif
@@ -61,7 +70,7 @@
     #define UNIT_MASK_H 0b00000000
 #endif 
 
-
+#ifdef _18F2321
 //#define pAddInc\
 //            FSR_REGISTER ++;\
 //            PTR_FSR+=CARRY_BYTE;\
@@ -263,6 +272,8 @@
             {\
                 PTR_FSR--;\
             }
+#endif //#ifdef _18F2321
+
 
 #define SSPBUF_RX SSPBUF
 #define SSPBUF_TX SSPBUF
@@ -461,10 +472,12 @@ unsigned char *ptr_FSR;
 #define PTR_FSR (*ptr_FSR)
 #else
 //#include "18f25fk20.h"
+#ifndef _WIN32
 #include "int18XXX.H"
 char PORTE    @ 0xF84;
 #define FSR_REGISTER FSR0
 #define PTR_FSR INDF0
+#endif
 #endif
 #define RAM_BANK_0 0
 #define RAM_BANK_1 1
@@ -485,6 +498,12 @@ char PORTE    @ 0xF84;
 #define I2C_SDA 4
 #define I2C_SCL 3
 #define _TRMT TRMT
+#undef UWORD  
+#define UWORD unsigned long
+#ifdef _WIN32
+#undef UWORD  
+#define UWORD unsigned short int
+#endif
 #endif
 //////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -594,6 +613,8 @@ char PORTE    @ 0xF84;
    #include "pic24HJ64GP502.h"
 #else // end of HI_TECH
    #include "p24hxxxx.h"
+   //#include "common.h"
+   //#include "dsp.h"
    #ifdef __PIC24HJ64GP502__
       #include "p24HJ64GP502.h"
    #endif
@@ -646,12 +667,16 @@ char PORTE    @ 0xF84;
 #define TXIFCOM2 IFS1bits.U2TXIF
 #endif
 
+//Timer 0
 #define TIMER0_INT_FLG IFS0bits.T1IF
 #define TIMER0_INT_ENBL IEC0bits.T1IE
 #define TMR0ON T1CONbits.TON
+
+//Timer 1 used for quad control
 #define TMR1IF IFS0bits.T2IF
 #define TMR1IE IEC0bits.T2IE
 #define TMR1ON T2CONbits.TON
+
 #define INT0_FLG IFS0bits.INT0IF
 #define INT0_ENBL IEC0bits.INT0IE
 #define INT1IF IFS1bits.INT1IF
@@ -757,14 +782,14 @@ void CsHigh(void);
 //#pragma config PWRTE=off, WDTE=off, FOSC=5, BODEN=off
 //#pragma config |= 0x2f20
 // for debuging by pickit 3
-#pragma config |= 0x2720
-// 0010 1111 0010 0000
+#pragma config |= 0x27b0
+// 0010 0111 1011 0000
 //   1                = 1 = Code protection off
 //    0               = 0 = CCP1 function on RB3
-//      1             = 1 = In-Circuit Debugger disabled, RB6 and RB7 are general purpose I/O pins
+//      0             = 1 = In-Circuit Debugger disabled, RB6 and RB7 are general purpose I/O pins
 //       11           = 11 = Write protection off
 //         1          = 1 = Code protection off;
-//           0        = 1 = RB3/PGM pin has PGM function, Low-Voltage Programming enabled
+//           1        = 1 = RB3/PGM pin has PGM function, Low-Voltage Programming enabled
 //            0       = 0 = BOR disabled
 //             1      = 0 = RA5/MCLR/VPP pin function is digital I/O, MCLR internally tied to VDD
 //                0   = 0 = PWRT enabled
@@ -1220,7 +1245,12 @@ void CsHigh(void);
 #ifdef __18CXX
 #pragma config OSC=INTIO2
 #else
+//#pragma config[1] = 0x08
+#ifdef DEBUG_SIM
 #pragma config[1] = 0x08
+#else
+#pragma config[1] = 0x06
+#endif
 #endif
 // CONFIG2L: CONFIGURATION REGISTER 2 LOW (BYTE ADDRESS 300002h)
 // bit 7-5 Unimplemented: Read as ‘0’
@@ -1243,7 +1273,7 @@ void CsHigh(void);
 #ifdef __18CXX
 #pragma config BOR=OFF
 #else
-#pragma config[2] = 0x10
+#pragma config[2] = 0x11
 #endif
 // CONFIG2H: CONFIGURATION REGISTER 2 HIGH (BYTE ADDRESS 300003h)
 // bit 7-5      Unimplemented: Read as ‘0’
@@ -1738,6 +1768,7 @@ unsigned char setTMR1DAY;
 
 #pragma rambank RAM_BANK_0
 /////////////////////////////////////BANK 0///////////////////////
+#define CRITICAL_BUF_SIZE 4
 #ifndef BUFFER_LEN
  #ifdef _18F2321_18F25K20
    #define BUFFER_LEN 18
@@ -1752,7 +1783,7 @@ unsigned char setTMR1DAY;
    #endif
  #endif
 #endif
-
+#ifndef NOT_USE_COM1
 // 0 byte == iInQuSize
 // 1 byte == iPtr1InQu
 // 2 byte == iPtr2InQu
@@ -1773,10 +1804,22 @@ struct BQueue
 };
 VOLATILE struct AQueue AInQu;
 VOLATILE struct BQueue AOutQu;
+#ifdef RX_FULL
+#define OVER_BUFFER_LEN 5
+VOLATILE struct OLQueue
+{
+    WORD iEntry;
+    WORD iQueueSize;
+    WORD iExit;
+    unsigned char Queue[OVER_BUFFER_LEN];
+} OverLoad;
+#endif
 #ifdef USE_COM2
 VOLATILE struct AQueue AInQuCom2;
 VOLATILE struct BQueue AOutQuCom2;
 #endif
+
+#endif // #ifndef NOT_USE_COM1
 
 #define MAX_ADR '9'
 #define MIN_ADR '1'
@@ -1786,22 +1829,34 @@ VOLATILE struct BQueue AOutQuCom2;
 unsigned char UnitADR;
 unsigned char UnitFrom;
 unsigned char SendCMD;
-#ifdef USE_OLD_CMD_EQ
-unsigned char RetransmitLen;
-#endif
+
+
 struct _MainB2{
 unsigned RetransmitTo:1;
 #ifdef NON_STANDART_MODEM
 unsigned SendOverLink:1;
+unsigned SendOverLinkAndProc:1;
+unsigned SendOverLinkStarted:1;
+unsigned SendOverlinkWasESC:1;
+unsigned FlashRQ:1;
+unsigned PingRQ:1;
+unsigned PingRSPRQ:1;
+VOLATILE unsigned DoPing:1;
+VOLATILE unsigned ConstantPing:1;
 #endif
-VOLATILE unsigned SomePacket:1;
+unsigned SendComOneByte:1;
 VOLATILE unsigned OutPacket:1;
 VOLATILE unsigned OutPacketESC:1;
-VOLATILE unsigned OutPacketZeroLen:1;
+VOLATILE unsigned OutPacketLenNull:1;
 
-VOLATILE unsigned CMDProcess:1;
-VOLATILE unsigned CMDProcessCheckESC:1;
-VOLATILE unsigned CMDProcessLastWasUnitAddr:1;
+VOLATILE unsigned GetPkt:1;
+VOLATILE unsigned GetPktESC:1;
+VOLATILE unsigned GetPktLenNull:1;
+VOLATILE unsigned RelayPktLenNull:1;
+VOLATILE unsigned RelayGranted:1;
+VOLATILE unsigned RelayPktOverload:1;
+VOLATILE unsigned RelayPktESC:1;
+VOLATILE unsigned PktAsCMD:1;
 unsigned getCMD:1;
 unsigned ESCNextByte:1;
 unsigned LastWasUnitAddr:1;
@@ -1820,10 +1875,10 @@ unsigned DoneWithCMD:1;
 unsigned ComNotI2C:1;
 #endif
 
-VOLATILE unsigned prepStream:1;
-VOLATILE unsigned prepCmd:1;
-VOLATILE unsigned prepESC:1;
-VOLATILE unsigned prepZeroLen:1;
+//VOLATILE unsigned prepStream:1;
+//VOLATILE unsigned prepCmd:1;
+//VOLATILE unsigned InComRetransmit:1;
+//VOLATILE unsigned InComZeroLenMsg:1;
 #ifdef EXT_INT
 VOLATILE unsigned ExtInterrupt:1;
 VOLATILE unsigned ExtInterrupt1:1;
@@ -1831,20 +1886,16 @@ VOLATILE unsigned ExtInterrupt2:1;
 VOLATILE unsigned InDoneNoSleep:1;
 VOLATILE unsigned ExtFirst:1;
 #endif
+
 } Main;
 
+
+unsigned char PingAttempts;
 VOLATILE unsigned char OutPacketUnit;
-VOLATILE unsigned char RetrUnit;
+VOLATILE unsigned char RelayPkt;
 VOLATILE unsigned char AllowMask;
 VOLATILE unsigned char UnitMask1;
 VOLATILE unsigned char UnitMask2;
-#ifdef ALLOW_RELAY_TO_NEW
-VOLATILE unsigned char AllowOldMask;
-VOLATILE unsigned char AllowOldMask1;
-VOLATILE unsigned char AllowOldMask2;
-VOLATILE unsigned char AllowOldMask3;
-VOLATILE unsigned char AllowOldMask4;
-#endif
 
 //bit BlockComm;
 // this is in BANK0
@@ -1858,23 +1909,18 @@ unsigned EchoWhenI2C:1;
 
 //} I2C_B3;
 //struct _I2CB4{
-#ifdef USE_OLD_CMD_EQ
-unsigned RetransI2CCom:1;
-unsigned RetransI2CComSet:1;
-unsigned RetransComI2C:1;
-unsigned RetransComI2CSet:1;
-#endif
 VOLATILE unsigned I2CGettingPKG:1;
 unsigned I2CReplyExpected:1;
 unsigned RetransI2ComCSet:1;
 unsigned Timer0Fired:1;
 
-unsigned SendComOneByte:1;
 
 unsigned AddresWasSend:1;
 } I2C;
 
 #pragma rambank RAM_BANK_1
+///////////////////////////////////////BANK 1//////////////////////
+
 // this is in BANK1
 struct _I2CB4_B5{
 unsigned I2Cread:1;
@@ -1896,20 +1942,9 @@ VOLATILE struct AQueue AInI2CQu;
 VOLATILE struct BQueue AOutI2CQu;
 #endif
 
-#ifdef SPEED_SEND_DATA
-#pragma rambank SPEED_SEND_DATA
-struct _SpeedB6{
-unsigned SpeedSend:1;
-unsigned SpeedSendLocked:1;
-unsigned SpeedSendUnit:1;
-unsigned SpeedSendWithESC:1;
-unsigned SpeedESCwas:1;
-} Speed;
-unsigned char *ptrSpeed;
-unsigned char LenSpeed;
-#endif
-
 #pragma rambank RAM_BANK_0
+///////////////////////////////////////BANK 0//////////////////////
+
 unsigned char LenI2CRead;
 unsigned char I2CReplyCMD;
 #ifdef __PIC24H__
@@ -1918,9 +1953,10 @@ rtccTimeDate RtccTimeDateVal;
 #endif
 
 //bit ReTransToI2C;
+#ifndef _WIN32
 unsigned char eeprom_read(unsigned char addr);
 void eeprom_write(unsigned char addr, unsigned char value);
-
+#endif
 
 
 #define SPBRG_4800_40MIPS 2064
@@ -1948,6 +1984,8 @@ void eeprom_write(unsigned char addr, unsigned char value);
 #define SPBRG_57600_16MHZ 16
 #define SPBRG_57600_32MHZ 34
 #define SPBRG_57600_64MHZ 68
+#define SPBRG_57600_10MIPS 42
+#define SPBRG_57600_20MIPS 85
 #define SPBRG_57600_40MIPS 172
 
 #define SPBRG_115200_16MHZ 8

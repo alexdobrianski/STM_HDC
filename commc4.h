@@ -4,23 +4,16 @@
 // begin COPY 4
 ///////////////////////////////////////////////////////////////////////   
 
+
+// standart commands:
+//<unit>=Xci<unit> - set responce unit(X) and command (c)
+//<unit>=X*<unit> and all data transfers to X till end of the packet
+//<unit>=X?<unit>   - timer sync message
+//<unit>~<unit>   - message from itself from other side of the loop    
         if (Main.SetFromAddr) //<unit>=Xc            //<unit>=Xci<unit> 
         {                     //       |         if ' ' than responce unit is not set
             if (bByte == ' ')
                 bByte = 0;
-#ifdef USE_OLD_CMD_EQ
-            if (bByte == '*') // this will switch stream permanently
-            {
-                return;
-            }
-            if (bittest(bByte,7))
-            {
-                 RetransmitLen = bByte&0x7f;
-                 Main.SetFromAddr = 0;
-                 Main.DoneWithCMD = 0;
-                 return;
-            }
-#endif
             UnitFrom = bByte;
             Main.SetFromAddr = 0;
             Main.SetSendCMD = 1;
@@ -81,35 +74,6 @@
 #endif
             return;
         }
-#ifdef USE_OLD_CMD_EQ
-        else if (I2C.SetI2CYesNo) //<unit>=xcI<unit> I= com->I2C C = I2C->com ' '=nothing 
-        {                         //         |
-            I2C.SetI2CYesNo = 0;
-            if (bByte == 'i') // it is just for convinience I2CReplyExpected can be set in any CMD
-            {
-                I2C.I2CReplyExpected = 1;
-            }
-            else if (bByte == 'I')
-            {
-                I2C.RetransComI2C = 1;
-                I2C.RetransComI2CSet = 0;
-                I2C.RetransI2CCom = 0;
-            }
-            else if (bByte == 'C') //<unit>=xcC = I2C->com ' '=nothing
-            {
-                I2C.RetransI2CCom = 1;
-                I2C.RetransI2CComSet = 0;
-                I2C.RetransComI2C = 0;
-            }
-            else // clean all set for retransmit
-            {
-                I2C.RetransI2CCom = 0;
-                I2C.RetransI2CComSet = 0;
-                I2C.RetransComI2C = 0;
-            }
-            Main.DoneWithCMD = 1; // long command =XCI done
-        }
-#endif
         else if (bByte == '=') // new version   "=XC" where X - unit to responce and C - one byte command to responce 
                                // if command is "=X*" than all packet till end has to be send over com to device X with closing packet byte (X at the end)
                                
@@ -123,11 +87,6 @@
                                //  high bit has to be set
             Main.DoneWithCMD = 0; // long command
             Main.SetFromAddr = 1;
-#ifdef USE_OLD_CMD_EQ
-            I2C.RetransComI2C = 0;
-            I2C.RetransComI2CSet = 0;
-            I2C.RetransI2CCom = 0;            
-#endif
         }
         // processing CMD
         else if (bByte == '~') // reseved test message from itself
@@ -142,15 +101,6 @@
 #endif // __PIC24H__
 #endif // SYNC_CLOCK_TIMER
         }
-#ifdef NON_STANDART_MODEM
-        else if (bByte == '*')
-        {
-            if (ATCMD & MODE_CONNECT) // was connection esatblished?
-            {
-                 Main.SendOverLink = 1;
-            }
-        }
-#endif
 #ifndef NO_I2C_PROC
         else if (bByte == '<') // "<"<I2CAddr><DATA>@ or "<"<I2C addr><data><unit> 
         {                      // "<"<I2Caddr><data>">"L@   or "<"<I2Caddr><data>">"L<unit> 
@@ -171,24 +121,69 @@
             I2C.NextI2CRead = 1;
         }
 #endif // NO_I2C_PROC
+
 #ifdef SSPORT
         else if (bByte == 'F') // manipulation with FLASH memory: read/write/erase/any flash command
         {
             Main.DoneWithCMD = 0; // long command
-            DataB3.FlashCmd = 1;
+            DataB3.FlashCmd = 1;  //flash state machine START
             DataB3.FlashCmdLen = 1;
+            
+            
+            //NOTE, <data> is a generic data, it could be the data to write or address of data to read.
             // send something to FLASH
             // F<length-of-packet><CMD><data>
             // send and receive responce from FLASH
             // F<length-of-packet><CMD><data>@<length-to-read>
             // in last case <length-of-packet> must include simbol '@'
-            // F\x01\x06              == write enable (flash command 06) -> send 0x06
+
+            ///////////////////////////
+            //Things to Note
+            ///////////////////////////
+            // 1. The Erase instruction must be preceded by a Write Enable (WREN) instruction.
+            //     To Bulk erase instr:
+            //          2F&#0#1&#0#6F&#0#1&c#72 
+            //     To read 16 bytes:
+            //          2F&#0#5&#0#3&#0#0&#0#0&#0#0@&#1#02
+            //     To write data:
+            //          2F&#0#1&#0#6F&#3#5&#0#2&#0#0&#0#0&#0#0Nasha Masha Luchshe Vashei potomy chto ona nasha 2 
+
+            ///////////////////////////
+            // Flash CMDs
+            ///////////////////////////
+            // \x02                   == flash write cmd
+            // \x03                   == read from flash
+            // \x04                   == Write Disable 0000 0100 04h
+            // \x06                   == enable write to flash
+            // \x20                   == erase 4Kbyte oage - this cmd does not exist on all flash mem
+            // \xc7                   == erase all mem from flash
+            // \xb9                   == (NOTE, not all flash has this cmd) Deep Power-down 1011 1001 B9h
+            // \xab                   == (NOTE, not all flash has this cmd) Release from Deep Power-down
+            
+            ///////////////////////////
+            // Custom
+            ///////////////////////////
+            // @                      == Chain read CMD after previous CMDs. 
+            //                             NOTE, include Byte count when specifying CMD length 
+            //                             Post '@' indicate length of bytes to be read.
+            
+            // F\x01\x06              == enable write (flash command 06) -> send 0x06
             // F\x01\0xc7             == erase all flash                 -> send =0xc7
             // F\x05\x03\x00\x12\x34@\x04 == read 4 bytes from a address 0x001234  -> send 0x03 0x00 0x12 0x34 <- read 4 bytes (must not to cross boundary)
             // F\x01\x06F\x0c\x02\x00\x11\x22\x00\x00\x00\x00\x00\x00\x00\x00 == write 8 bytes to address 0x001122
             // F\x01\x06F\x04\x20\x00\x04\x00 == erase sector (4K) starting from address 0x000400
         }
+        else if (bByte == 'f') // speed up cmd to write into FLASh memory
+        {
+            // instead of :
+            // F\x01\x06F\x0c\x02\x00\x11\x22\x00\x00\x00\x00\x00\x00\x00\x00 == write 8 bytes to address 0x001122
+            //              f\x0b\x00\x11\x22\x00\x00\x00\x00\x00\x00\x00\x00 == write 8 bytes to address 0x001122
+            Main.DoneWithCMD = 0; // long command
+            DataB3.FlashCmdShort = 1;
+            DataB3.FlashCmdLen = 1;
+        }
 #endif
+
 /////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////

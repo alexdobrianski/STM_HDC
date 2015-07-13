@@ -3,6 +3,7 @@
 ///////////////////////////////////////////////////////////////////////
 // begin of COPY 1
 ///////////////////////////////////////////////////////////////////////
+
 //#pragma rambank RAM_BANK_2
 //unsigned char CMD[4];
 //bit CmdFetch;
@@ -12,6 +13,7 @@
 
 //unsigned char CommLinesOld;
 #ifdef __PIC24H__
+
 #ifdef HI_TECH_C
 #define IF_SSPIF void interrupt _MI2C1Interrupt(void) @ MI2C1_VCTR
 #define IF_RCIF void interrupt _U1RXInterrupt(void) @ U1RX_VCTR
@@ -25,6 +27,7 @@
 #define IF_INT1IF void interrupt _INT1Interrupt(void) @ INT1_VCTR
 #define IF_INT2IF void interrupt _INT2Interrupt(void) @ INT2_VCTR
 #else // hitech ends
+
 //#define _ISR __attribute__((interrupt))
 //#define _ISRFAST __attribute__((interrupt, shadow))
 #define _ISR __attribute__((interrupt))
@@ -32,6 +35,8 @@
 #define IF_SSPIF void __attribute__((interrupt, no_auto_psv)) _MI2C1Interrupt(void)
 #define IF_RCIF void __attribute__((interrupt, no_auto_psv)) _U1RXInterrupt(void)
 #define IF_TXIE void __attribute__((interrupt, no_auto_psv)) _U1TXInterrupt(void)
+
+
 #define IF_TIMER0_INT_FLG void __attribute__((interrupt, no_auto_psv)) _T1Interrupt(void)
 #define IF_TMR1IF void __attribute__((interrupt, no_auto_psv)) _T2Interrupt(void)
 #ifdef BT_TIMER3
@@ -53,6 +58,9 @@
 #define IF_TMR5IF void __attribute__((interrupt, no_auto_psv)) _T5Interrupt(void)
 #define IF_TMR4IF void __attribute__((interrupt, no_auto_psv)) _T4Interrupt(void)
 #define IF_RTCC void __attribute__((interrupt, no_auto_psv)) _RTCCInterrupt(void)
+#define IF_ADCDONE void __attribute__((interrupt, no_auto_psv)) _ADC1Interrupt(void)
+#define IF_ADC_DMA void __attribute__((interrupt, no_auto_psv)) _DMA0Interrupt(void)
+//#define IF_ADCDONE void __attribute__((__interrupt__)) _ADC1Interrupt(void)
 
 #endif // C30 ends
 #else // end of C30 support
@@ -65,6 +73,9 @@
 #ifdef BT_TIMER3
 #define IF_TMR3IF if (TMR3IF)
 #endif
+   #ifdef BT_TX
+     #define IF_TMR2IF if (TMR2IF)
+   #endif
 #define IF_INT0_FLG if (INT0_FLG)
 #define IF_INT1IF if (INT1IF)
 #ifdef __18CXX
@@ -116,7 +127,417 @@ INTERRUPT int_server( void)
 
    unsigned char work1;
    unsigned char work2;
+// redefinitions
+#define GETCH_BYTE work2
+#ifdef BT_TX
+   INTTimer1 = TIMER1;
+   INTTimer3 = TIMER3;
+   INTTimer1HCount = Timer1HCount;
+   INTTimer3HCount = Timer3HCount;
 #endif
+#endif
+    /////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////
+	//TIMER ONE Handler (Interrupt Service Routine): 
+	//	logical 1 starting from zero (Type B _PIC24H)
+    IF_TMR1IF //if (TMR1IF)  // update clock   TX
+    {
+        TMR1IF = 0;
+        //TmrAllConter++; 
+#ifdef BT_TIMER1
+        if (DataB0.Timer1Meausre)
+        {
+            Tmr1High++; // timer count and interrupts continue
+        }
+        else if (DataB0.Timer1Count)
+        {
+            if ((++Tmr1TOHigh) == 0)
+            {
+                Tmr1LoadLow+=TIMER1;
+                TMR1H = (unsigned char)(Tmr1LoadLow>>8);
+                TMR1L = (unsigned char)(Tmr1LoadLow&0xff);
+
+                Tmr1TOHigh = Tmr1LoadHigh;
+                Tmr1LoadLow = Tmr1LoadLowCopy;
+                //TIMER1 = Tmr1LoadLow;  
+                Timer1HCount++; // become 0 each 111.0016 sec
+
+                
+                if (DataB0.Timer1DoTX) // was a request to TX data on that frquency
+                {
+                    PORT_AMPL.BT_TX = 1;
+                    bitset(PORT_BT,Tx_CE);
+
+                    DataB0.Timer1DoTX = 0;
+                    
+
+                }
+                if (++FqTXCount>=3)
+                {
+                    FqTXCount = 0;
+                    FqTX = Freq1;
+
+                    if (Main.DoPing)
+                    {
+                        if (ATCMD & MODE_CONNECT)
+                        {
+                            if (--PingDelay == 0)
+                            {
+                                Main.PingRQ = 1;
+                                PingDelay = PING_DELAY;
+                                if (!Main.ConstantPing)
+                                {
+                                    if (--PingAttempts==0)
+                                        Main.DoPing = 0;
+                                }
+                            }
+                        }
+                    }
+
+#ifdef DEBUG_LED 
+                    if (DebugLedCount)
+                    { 
+                        if (--DebugLedCount ==0)
+                            DEBUG_LED_OFF;
+                    }
+                    else
+                        DEBUG_LED_OFF;
+#endif
+                }
+                else
+                {
+                   if (FqTXCount == 1)
+                       FqTX = Freq2;
+                   else
+                       FqTX = Freq3;
+                }
+               
+            }
+        }
+
+#else // BT timer1
+
+#ifdef QUAD_CTLR //src code for quad control
+		quad_ctlr_time++;
+
+		if(quad_ctlr_time >= 20)
+		{
+			quad_ctlr_time = 0;			
+		}
+
+		switch(quad_ctlr_time) 
+		{
+		case 0:
+			QUAD_0 = 1;
+            TMR2 = -QUAD_ONE_MS;
+            AD1CON1bits.ADON = 1; //START analog to digital conversion (This stops @ IF_ADCDONE interrupt)
+			break;
+		case 1: //1ms passed
+            
+			if(period_quad_0 == 0)
+			{
+				quad_ctlr_time++;
+				QUAD_0 = 0;
+				TMR2 = -QUAD_ONE_MS;	
+			}
+            else 
+            {
+                TMR2 = -period_quad_0; //setting offset (manipulating timer)
+            }
+			break;
+		case 2: //1ms plus timer passed
+            QUAD_0 = 0;
+            if(period_quad_0 == QUAD_ONE_MS)
+            {
+                quad_ctlr_time++;
+				TMR2 = -QUAD_ONE_MS;
+            }
+            else 
+            {
+                TMR2 = -QUAD_ONE_MS + period_quad_0;
+            }
+     
+			break;
+//		case 3:	//2ms passed
+//            TMR2 = -QUAD_ONE_MS;
+//			break;
+		case 4: //3ms passed
+            QUAD_1 = 1;
+            TMR2 = -QUAD_ONE_MS;
+			break;
+		case 5: //4ms passed
+            if(period_quad_1 == 0) 
+            {			
+                quad_ctlr_time++;
+                QUAD_1 = 0;
+                TMR2 = -QUAD_ONE_MS;
+            }
+            else
+            {
+                TMR2 = -period_quad_1;
+            }
+            break;
+		case 6:	//4ms plus period_quad_1
+            QUAD_1 = 0;
+            if(period_quad_1 == QUAD_ONE_MS)
+            {
+                quad_ctlr_time++;
+                TMR2 = -QUAD_ONE_MS;
+            }
+            else
+            {
+                TMR2 = -QUAD_ONE_MS + period_quad_1;
+            }
+			break;
+//		case 7:	//5ms passed
+//            TMR2 = -QUAD_ONE_MS;
+//			break;
+		case 8: //6ms passed
+            QUAD_2 = 1;
+            TMR2 = -QUAD_ONE_MS;		
+			break;
+		case 9: //7ms passed
+            if(period_quad_2 == 0)
+            {
+                quad_ctlr_time++;
+                QUAD_2 = 0;
+				TMR2 = -QUAD_ONE_MS;
+            }
+            else
+            {
+                TMR2 = - period_quad_2;
+            }
+			break;
+		case 10: //7ms plus period_quad_2 passed
+            QUAD_2 = 0;
+            if(period_quad_2 == QUAD_ONE_MS)
+            {
+                quad_ctlr_time++;
+                TMR2 = -QUAD_ONE_MS;
+            }
+            else
+            {
+                TMR2 = -QUAD_ONE_MS + period_quad_2;
+            }				
+			break;
+//		case 11: //8ms passed
+//            TMR2 = -QUAD_ONE_MS;			
+//			break;
+		case 12: //9ms passed
+
+            QUAD_3 = 1;
+            TMR2 = -QUAD_ONE_MS;
+			break;
+		case 13: //10ms passed
+            if(period_quad_3 == 0)
+            {
+            QUAD_3 = 0;
+                TMR2 = -QUAD_ONE_MS;
+                quad_ctlr_time++;
+            }
+            else
+            {
+                TMR2 = -period_quad_3;
+            }
+			break;
+		case 14: //10ms plus period_quad_3 passed
+            QUAD_3 = 0;
+            if(period_quad_3 == QUAD_ONE_MS) 
+            {
+                quad_ctlr_time++;
+                TMR2 = -QUAD_ONE_MS;
+            }
+            else
+            {
+                TMR2 = -QUAD_ONE_MS + period_quad_3;
+            }
+			break;
+		default:
+            TMR2 = -QUAD_ONE_MS;
+			break;
+		}
+
+#else
+        if (++TMR130 == TIMER1_ADJ0)
+        {
+#ifdef __PIC24H__
+            TMR2 += TIMER1_ADJUST;//46272; // needs to be adjusted !!!
+            if (TMR2 < TIMER1_ADJUST)//46272)
+                goto TMR2_COUNT_DONE;
+#else
+
+RE_READ_TMR1:
+            work2 = TMR1H;
+            work1 = TMR1L;
+//          point of time
+            if (work2 != TMR1H)    // 4 tick
+                goto RE_READ_TMR1;// 
+            if (work1 > 149)        // 4 tick
+            {
+                work1 += 0x6b;        
+                work2 += 0x7b;        
+                nop();
+                nop();              // 8 tick
+            }
+            else
+            {
+                work1 += 0x6b;    
+                work2 += 0x8f;    // 8 tick
+                
+            }
+            TMR1L = 0;            // 1 tick
+            TMR1H = work2;        // 2 tick
+            TMR1L = work1;        // 2 tick
+            // error will be in 1/30 TMR30 counter
+            // needs to make sure from 0-29 is 1130 ticks plus on each TMR130 value
+            //   on TMR130 == 30 it is adjust to next sec proper set
+#endif
+        }
+        else if (TMR130 >TIMER1_ADJ0)
+        {
+            //RtccReadTimeDate(&RtccTimeDateVal);
+TMR2_COUNT_DONE:
+            TMR130 = 0;
+            if (++TMR1SEC > 59)
+            {
+                TMR1SEC=0;
+                if (++TMR1MIN > 59)
+                {
+                    TMR1MIN = 0;
+                    //RTTCCounts = 0;
+                    if (++TMR1HOUR > 23)
+                    {
+                         TMR1HOUR = 0;
+                         if (TMR1YEAR & 0x3) // regilar year
+                         {
+                             if (++TMR1DAY > 365)
+                             {
+                                 TMR1DAY = 0;
+                                 TMR1YEAR++;
+                             }
+                         }
+                         else // leap year
+                         {
+                             if (++TMR1DAY > 366)
+                             {
+                                 TMR1DAY = 0;
+                                 TMR1YEAR++;
+                             } 
+                         }
+#ifdef USE_LCD
+                         sprintf(&LCDDD[0],"%02d",TMR1DAY);
+#endif
+                    }
+#ifdef USE_LCD
+                    sprintf(&LCDHH[0],"%02d",TMR1HOUR);
+#endif
+                }
+#ifdef USE_LCD
+                sprintf(&LCDMM[0],"%02d",TMR1MIN);
+#endif
+            }
+#ifdef USE_LCD
+            sprintf(&LCDSS[0],"%02d",TMR1SEC);
+#endif
+        }
+#endif //endif for NONE QUAD_CTLR
+#endif //endif for NONE BT_TIMER
+    }
+
+#ifdef BT_TIMER3
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    IF_TMR3IF // RX timer for BT
+    {
+        TMR3IF = 0;    
+        if (DataB0.Tmr3DoMeausreFq1_Fq2)
+        {
+            Tmr3High++; // timer count till next interrupt from BT RX on FQ2
+        }
+        else if (DataB0.Tmr3Run)
+        {
+            if ((++Tmr3TOHigh) == 0)
+            {
+                Tmr3LoadLow +=TIMER3;
+                TMR3H = (unsigned char)(Tmr3LoadLow>>8);
+                TMR3L = (unsigned char)(Tmr3LoadLow&0xff);
+                Tmr3TOHigh = Tmr3LoadHigh;
+                Tmr3LoadLow = Tmr3LoadLowCopy;
+
+                if (++FqRXRealCount>=3)
+                    FqRXRealCount = 0;
+                if (iAdjRX != 0x7f)
+                    iAdjRX++;
+                // was detected that RX is out of sync for 4 seconds == do nothing in ISR == no TM3 interrupts
+                if (DataB0.Timer3OutSyncRQ)
+                    goto OUT_OF_SYNC;
+
+                if (SkipRXTmr3)
+                {
+                   SkipRXTmr3 = 0;  // no timer3 (RX) interrupt == interrupt will be processed in first place
+                }
+                else
+                {
+                    if (BTType == 1)
+                    {
+                        DataB0.Tmr3Inturrupt = 1;
+                        // in RX mode real and vluctuationg RXCounters needs to be syncronized inside main
+                        if (FqRXCount ==0)
+                        {
+                            if (OutSyncCounter)
+                            {
+                                if (--OutSyncCounter == 0)
+                                {
+                                    // SYNC_DEBUG 5: next 4 lines commented == and no wait on FQ1 in case of lost syncroniration
+#if 1 
+                                    DataB0.Timer3OutSyncRQ = 1;
+                                    DataB0.Tmr3Inturrupt = 0;  // cancel interupt == no switch of the frequency
+                                    TMR3H = 0;                 // timer started to run from 0
+                                    TMR3L = 0;
+#endif
+                                }    
+                            }
+                        }
+                    }
+                    else // TX state 
+                    {   // SYNC_DEBUG 3 change to "#if 0" (case without syncronization of FqRXRealCount on TX operation)
+                        // in TX real and vluctuating RXCounter will be syncronized
+#if 1
+                        FqRXCount = FqRXRealCount;
+                        if (FqRXCount==0)
+                            FqRX = Freq1;
+                        else
+                        {
+                            if (FqRXCount == 1)
+                               FqRX = Freq2;
+                            else
+                               FqRX = Freq3;
+                        }
+#else     // case without syncronization (usefull for debugging)
+                        if (++FqRXCount>=3)
+                        {
+                            FqRXCount = 0;
+                            FqRX = Freq1;
+                        }
+                        else
+                        {
+                            if (FqRXCount == 1)
+                               FqRX = Freq2;
+                            else
+                               FqRX = Freq3;
+                        }
+#endif
+                    }
+                }
+OUT_OF_SYNC:;
+            }
+        }
+        
+    }
+#endif
+
+
+
 #ifndef NO_I2C_PROC
    //////////////////////////////////////////////////////////////////////////////////////////
    //////////////////////////////////////////////////////////////////////////////////////////
@@ -569,17 +990,19 @@ MAIN_EXIT:;
 #endif //__PIC24H__
    ///////////////////////////////////////////////////////////////////////////////////
    ///////////////////////////////////////////////////////////////////////////////////
+#ifndef NOT_USE_COM1
    IF_RCIF //if (RCIF)
    {
 #ifdef __PIC24H__
        unsigned int work1;
        unsigned int work2;
+#define GETCH_BYTE work2
 
 #endif
 
        //RCIF = 0;  // cleaned by reading RCREG
 #ifdef __PIC24H__
-        RCIF = 0;  // on pic24 needs to clean interrupt manualy
+       RCIF = 0;  // on pic24 needs to clean interrupt manualy
        if (U1STAbits.URXDA) // this bit indicat that bytes avalable in FIFO
        {
            while(U1STAbits.URXDA)
@@ -592,12 +1015,12 @@ MAIN_EXIT:;
 #endif
 
                work1 = RCSTA;
-               work2 = RCREG;
-#ifdef SYNC_CLOCK_TIMER
+               GETCH_BYTE = RCREG;
 
+#ifdef SYNC_CLOCK_TIMER
                if (!Main.getCMD) // CMD not receved et.
                {
-                   if (work2 == MY_UNIT) // record time of received message
+                   if (GETCH_BYTE == MY_UNIT) // record time of received message
                    {
 #ifdef __PIC24H__
                        Tmr4Count =TMR4;  // it is possible to count delays from interrupt to recorded time
@@ -627,285 +1050,168 @@ RC_ERROR:
 #endif
 RC_24_ERROR:
                Main.getCMD = 0;
-#ifdef USE_OLD_CMD_EQ
-               I2C.RetransComI2C = 0;
-#endif
                //Main.PrepI2C = 0;
                continue; // can be another bytes
 NO_RC_ERROR:
-#ifdef NEW_CMD_PROC
                // optimized version
+
                
-
-               if (Main.prepESC)     // was skip = retransmit byte - top priority
+               if (RelayPkt == 0)  // no packet is in a process
                {
-                   Main.prepESC = 0;
-                   Main.prepZeroLen = 0;
-                   goto RELAY_SYMB; // ===> retransmit
-               }
-               else if (RetrUnit) // relay data to next unit during processing streaming == stream to another unit retransmit directly without entering queue
-               {
-                   if (work2 == ESC_SYMB) // do relay but account that is was ESC char 
+                   if (Main.GetPkt) // packet in queue
                    {
-                       Main.prepZeroLen = 0;
-                       Main.prepESC = 1;//====> retransmit
-RELAY_SYMB:
-                       if (Main.LockToQueue)
-                           goto INSERT_TO_COM_Q;
-
-                       if (Main.OutPacket) // serial output busy only way is for any data is via input queue
+                       if (Main.GetPktESC)
+                           Main.GetPktESC = 0;
+                       else if (GETCH_BYTE == ESC_SYMB)
+                           Main.GetPktESC = 1;
+                       else if (GETCH_BYTE == MY_UNIT)
                        {
-                           Main.LockToQueue =1;
-                           goto INSERT_TO_COM_Q;
-                       } 
-                       // exact copy from putchar == it is big!!! but it can be called recursivly!!
-                       ///////////////////////////////////////////////////////////////////////////////////////
-                       // direct output to com1
-                       ///////////////////////////////////////////////////////////////////////////////////////
-                       if (AOutQu.iQueueSize == 0)  // if this is a com and queue is empty then needs to directly send byte(s) 
-                       {                            // on 16LH88,16F884,18F2321 = two bytes on pic24 = 4 bytes
-                           // at that point Uart interrupt is disabled
-                           if (_TRMT)            // indicator that tramsmit shift register is empty (on pic24 it is also mean that buffer is empty too)
-                           {
-                               TXEN = 1;
-                               I2C.SendComOneByte = 0;
-                               TXREG = work2; // this will clean TXIF on 88,884 and 2321
-                           }
-                           else // case when something has allready send directly
-                           {
-#ifdef __PIC24H__
-                               TXIF = 0; // for pic24 needs to clean uart interrupt in software
-                               if (!U1STAbits.UTXBF) // on pic24 this bit is empy when at least there is one space in Tx buffer
-                                   TXREG = work2;   // full up TX buffer to full capacity, also cleans TXIF
-                               else
-                                   goto SEND_BYTE_TO_QU; // placing simbol into queue will also enable uart interrupt
-#else
-                               if (!I2C.SendComOneByte)      // one byte was send already 
-                               {
-                                   TXREG = work2;           // this will clean TXIF 
-                                   I2C.SendComOneByte = 1;
-                               }
-                               else                     // two bytes was send on 88,884,2321 and up to 4 was send on pic24
-                               {
-                                   goto SEND_BYTE_TO_QU; // placing simbol into queue will also enable uart interrupt
-                               }
-#endif
-                           }
+                           if (!Main.GetPktLenNull)
+                               Main.GetPkt = 0;
                        }
                        else
+                           Main.GetPktLenNull = 0;
+
+                       goto INSERT_TO_COM_Q;
+                   }
+                   if (GETCH_BYTE == MY_UNIT)
+                   {
+                       Main.GetPkt = 1;
+                       Main.GetPktLenNull = 1;
+                       goto INSERT_TO_COM_Q;
+                   }
+                   if (GETCH_BYTE <= MAX_ADR)
+                   {            
+                       if (GETCH_BYTE >= MIN_ADR) // msg to relay
                        {
-                           if (AOutQu.iQueueSize < OUT_BUFFER_LEN)
+                           RelayPkt = GETCH_BYTE;
+                           Main.RelayPktLenNull = 1;
+RELAY_CONDITIONS:
+                           // conditions to start relay -
+                           if (!TXIE) // if TX interrupt enabled == all comm data has to be sent to queue == relay impossible
                            {
-SEND_BYTE_TO_QU:
-                               AOutQu.Queue[AOutQu.iEntry] = work2; // add bytes to a queue
-                               if (++AOutQu.iEntry >= OUT_BUFFER_LEN)
-                                   AOutQu.iEntry = 0;
-                               AOutQu.iQueueSize++; // this is unar operation == it does not interfere with interrupt service decrement
-                               //if (!Main.PrepI2C)      // and allow transmit interrupt
-                               TXIE = 1;  // placed simbol will be pushed out of the queue by interrupt
-                           } 
-                       }
-                       goto END_INPUT_COM;
-                       /////////////////////////////////////////////////////////////////////////////////////////////
-                       //   end of direct output to com1
-                       /////////////////////////////////////////////////////////////////////////////////////////////
-                   }
-                   else if (work2 == RetrUnit) // relay done
-                   {
-                       if (Main.prepZeroLen) // packets with 0 length does not exsists
-                           goto RELAY_SYMB; // ===> retransmit
-                       RetrUnit = 0;
-                       Main.SomePacket = 0;
-                       goto RELAY_SYMB; // ===> retransmit
-                   }
-                   else if (work2 == MY_UNIT)
-                   {
-                       RetrUnit = 0;
-                       goto SET_MY_UNIT;
-                   }
-                   else if (work2 <= MAX_ADR)
-                   {            
-                       if (work2 >= MIN_ADR) // msg to relay
-                           goto TO_ANOTHER_UNIT;
-                   }
-                   
-                   Main.prepZeroLen = 0;
-                   goto RELAY_SYMB; // ===> retransmit
-               }
-               else if (Main.CMDProcess)
-               {
-                   if (Main.CMDProcessCheckESC)
-                   {
-                      Main.CMDProcessCheckESC = 0;  // =======> process message => insert in queue
-                   }
-                   else if (work2 == ESC_SYMB)
-                   {
-                        Main.CMDProcessCheckESC = 1;
-                   }
-                   else if (work2 == MY_UNIT)
-                   {
-                      Main.CMDProcess = 0;
-                      ; // =======> process last byte => insert in queue = but packet done
-                   }
-                   else if (work2 <= MAX_ADR) // if inside packet present another one == send it to loop
-                   {            
-                       if (work2 >= MIN_ADR) // packet to relay
-                          // retransmit to another unit has a priority - current status freazed
-                           goto TO_ANOTHER_UNIT;
-                   }         
-                   ;  // =======> process message => insert in queue
-               }
-               else // not a command mode == stream mode
-               { 
-                   if (work2 == ESC_SYMB) // do relay
-                   {
-                       Main.prepZeroLen = 0;
-                       Main.prepESC = 1;//====> retransmit
-                       goto RELAY_SYMB; // ===> retransmit
-                   }
-                   else if (work2 == MY_UNIT) // packet addresed to a unit
-                   {
-SET_MY_UNIT:
-                       Main.CMDProcess = 1;
-                       Main.CMDProcessCheckESC = 0;
-                       //Main.CMDProcessLastWasUnitAddr = 1;
-                       Main.getCMD =1; // byte eated
-                       Main.LastWasUnitAddr = 1;
-                       Main.ESCNextByte = 0;
-                       goto END_INPUT_COM;
-                   }
-                   else
-                   {
-                       if (work2 <= MAX_ADR)
-                       {            
-                           if (work2 >= MIN_ADR) // packet to relay to another untis
-                           {
-TO_ANOTHER_UNIT:               //if (Main.OutPacket)  // if packet alreadi in serial output then input stream has to be processed via queue
-                               //{
-                               //    goto INSERT_TO_COM_Q;
-                               //}
-                               Main.SomePacket = 1;
-                               RetrUnit = work2;
-                               Main.prepZeroLen = 1;
-                               Main.prepESC = 0;
+                                if (AOutQu.iQueueSize == 0) // if in outQueue there are someting == all comm data to be sent to queue == relay impossible
+                                {
+#ifdef TX_NOT_READY
+                                    // if it is only one unit on PC then it is possible to set bit 
+                                    // needs inform previous unit to suspend send bytes
+                                    // that will be done on TX interrupt
+                                    if (TX_NOT_READY)  // next unit is not ready to accept the data 
+                                    {
+                                        RX_FULL = 1;   // then all must go to the queue
+                                        goto RELAY_NOT_GRANTED;
+                                    }
+#endif                              
+                                    Main.RelayGranted = 1;
+DIRECT_RELAY:
+#ifdef TX_NOT_READY
+                                    if (OverLoad.iQueueSize != 0) // was condition when TX was not ready = that are chars from hardware queue
+                                        goto OVERLOAD_QUEUE;
+                                    // if it is only one unit on PC then it is possible to set bit 
+                                    // needs inform previous unit to suspend send bytes
+                                    // that will be done on TX interrupt
+                                    if (TX_NOT_READY)  // next unit is not ready to accsept the data 
+                                    {
+OVERLOAD_QUEUE:
+                                        RX_FULL = 1;   // needs to hold previous but it can be 4 bytes in the hardware queue
+                                        Main.RelayPktOverload =1;
+                                        if (OverLoad.iQueueSize < OVER_BUFFER_LEN)
+               	                        {
+                                            OverLoad.Queue[OverLoad.iEntry] = GETCH_BYTE;
+                                            if (++OverLoad.iEntry >= OVER_BUFFER_LEN)
+                                                OverLoad.iEntry = 0;
+                                            OverLoad.iQueueSize++;
+                                        }
+                                        goto END_INPUT_COM;
+                                    }
+#endif
+                                    // exact copy from putchar == it is big!!! but it can not be called recursivly!!
+                                    ///////////////////////////////////////////////////////////////////////////////////////
+                                    // direct output to com1
+                                    ///////////////////////////////////////////////////////////////////////////////////////
+                                    if (AOutQu.iQueueSize < OUT_BUFFER_LEN)
+                                    {
+                                        AOutQu.Queue[AOutQu.iEntry] = GETCH_BYTE; // add bytes to a queue
+                                        if (++AOutQu.iEntry >= OUT_BUFFER_LEN)
+                                            AOutQu.iEntry = 0;
+                                        AOutQu.iQueueSize++; // this is unar operation == it does not interfere with interrupt service decrement
+										TXIF = 1;  // force interrupt
+                                        TXIE = 1;  // placed simbol will be pushed out of the queue by interrupt
+                                    } 
+#ifdef RX_FULL
+                                    if (AOutQu.iQueueSize > (OUT_BUFFER_LEN-CRITICAL_BUF_SIZE))
+                                        RX_FULL = 1;
+#endif                                    
+                                    goto END_INPUT_COM;
+                                }
                            }
+                           // relay conditionas can not be granted
+RELAY_NOT_GRANTED:         Main.RelayGranted = 0;
+                           goto INSERT_TO_COM_Q;   
                        }
-                       goto RELAY_SYMB; // ===> retransmit
                    }
-               }    
+                   // all not belong to a packet == garbage has to be removed
+                   goto END_INPUT_COM;
+               }
+               else // if (RelayPkt != 0)  // paket is relaying 
+               {
+                   if (Main.RelayPktESC)
+                       Main.RelayPktESC = 0;
+                   else if (GETCH_BYTE == ESC_SYMB)
+                       Main.RelayPktESC = 1;
+                   else if (GETCH_BYTE == RelayPkt)
+                   {
+                       if (!Main.RelayPktLenNull) // need to skip <Unit><Unit> to fix the error, or to support <unin><Unin> <data> format of the packet
+                           RelayPkt = 0;
+                       if (Main.RelayGranted)
+                       {
+                           Main.RelayGranted = 0;
+                           goto DIRECT_RELAY;
+                       }        
+                       goto INSERT_TO_COM_Q;
+                   }
+                   else 
+                       Main.RelayPktLenNull = 0;
+                   if (Main.RelayGranted)
+                       goto DIRECT_RELAY;
+                   goto INSERT_TO_COM_Q; 
+               }
 //////////////////////////////////////////////////////////////////
 // end of optimized version
 //////////////////////////////////////////////////////////////////
-#else //  NOT NEW_CMD_PROC
-               if (RetrUnit) // relay data to next unit during processing streaming == stream to another unit retransmit directly without entering queue
-               {
-                   if (Main.prepStream)
-                   {
-                      
-                       if (Main.prepESC)     // was skip = clean and relay
-                       {
-                           Main.prepESC = 0;
-                           Main.prepZeroLen = 0;
-                           goto RELAY_SYMB; // ===> retransmit
-                       }
-                       else if (work2 == ESC_SYMB) // do relay
-                       {
-                           Main.prepZeroLen = 0;
-                           Main.prepESC = 1;//====> retransmit
-RELAY_SYMB:
-                           // exact copy from putchar == it is big!!! but it can be called recursivly!!
-                           ///////////////////////////////////////////////////////////////////////////////////////
-                           // direct output to com1
-                           ///////////////////////////////////////////////////////////////////////////////////////
-                           if (AOutQu.iQueueSize == 0)  // if this is a com and queue is empty then needs to directly send byte(s) 
-                           {                            // on 16LH88,16F884,18F2321 = two bytes on pic24 = 4 bytes
-                               // at that point Uart interrupt is disabled
-                               if (_TRMT)            // indicator that tramsmit shift register is empty (on pic24 it is also mean that buffer is empty too)
-                               {
-                                   TXEN = 1;
-                                   I2C.SendComOneByte = 0;
-                                   TXREG = work2; // this will clean TXIF on 88,884 and 2321
-                               }
-                               else // case when something has allready send directly
-                               {
-#ifdef __PIC24H__
-                                    TXIF = 0; // for pic24 needs to clean uart interrupt in software
-                                    if (!U1STAbits.UTXBF) // on pic24 this bit is empy when at least there is one space in Tx buffer
-                                        TXREG = work2;   // full up TX buffer to full capacity, also cleans TXIF
-                                    else
-                                        goto SEND_BYTE_TO_QU; // placing simbol into queue will also enable uart interrupt
-#else
-                                    if (!I2C.SendComOneByte)      // one byte was send already 
-                                    {
-                                        TXREG = work2;           // this will clean TXIF 
-                                        I2C.SendComOneByte = 1;
-                                    }
-                                    else                     // two bytes was send on 88,884,2321 and up to 4 was send on pic24
-                                    {
-                                           goto SEND_BYTE_TO_QU; // placing simbol into queue will also enable uart interrupt
-                                    }
-
-#endif
-                               }
-                           }
-                           else
-                           {
-                               if (AOutQu.iQueueSize < OUT_BUFFER_LEN)
-                               {
-SEND_BYTE_TO_QU:
-                                   AOutQu.Queue[AOutQu.iEntry] = work2; // add bytes to a queue
-                                   if (++AOutQu.iEntry >= OUT_BUFFER_LEN)
-                                       AOutQu.iEntry = 0;
-                                   AOutQu.iQueueSize++; // this is unar operation == it does not interfere with interrupt service decrement
-                                   //if (!Main.PrepI2C)      // and allow transmit interrupt
-                                   TXIE = 1;  // placed simbol will be pushed out of the queue by interrupt
-                               } 
-                           }
-                           goto END_INPUT_COM;
-                           /////////////////////////////////////////////////////////////////////////////////////////////
-                           //   end of direct output to com1
-                           /////////////////////////////////////////////////////////////////////////////////////////////
-                       }
-                       else if (work2 == RetrUnit) // relay done
-                       {
-                           if (Main.prepZeroLen) // packets with 0 length does not exsists
-                               goto RELAY_SYMB; // ===> retransmit
-                           RetrUnit = 0;
-                           Main.prepStream = 1;
-#ifdef ALLOW_RELAY_TO_NEW
-                           AllowMask = AllowOldMask;AllowOldMask= AllowOldMask1;AllowOldMask1= AllowOldMask2;AllowOldMask2= AllowOldMask3;AllowOldMask3= AllowOldMask4; // restore allow mask
-                           AllowOldMask4 = 0xff;
-#else
-                           AllowMask = 0xff; // it is possible to send msg to any unit over COM
-#endif
-                           goto RELAY_SYMB; // ===> retransmit
-                       }
-#ifdef ALLOW_RELAY_TO_NEW
-#endif
-                       Main.prepZeroLen = 0;
-                       goto RELAY_SYMB; // ===> retransmit
-                   }
-                   // ===> process simbol
-               }
-#endif   //  end NEW_CMD_PROC
 INSERT_TO_COM_Q:
                if (AInQu.iQueueSize < BUFFER_LEN)
                {
-                   AInQu.Queue[AInQu.iEntry] = work2;
+                   AInQu.Queue[AInQu.iEntry] = GETCH_BYTE;
                    if (++AInQu.iEntry >= BUFFER_LEN)
                        AInQu.iEntry = 0;
-#pragma updateBank 0
+//#pragma updateBank 0
                    AInQu.iQueueSize++;
-#pragma updateBank 1
+//#pragma updateBank 1
                }
                //else
                //    W = RCREG; // this byte is skipped to process
+#ifdef RX_FULL
+               // if no space in input serial queue then ask previous unit to hold next byte
+               // hardware XON/XOFF needs to be enabled for com port on PC
+              
+               if (AInQu.iQueueSize > (BUFFER_LEN-CRITICAL_BUF_SIZE))
+                   RX_FULL = 1;
+               else
+               {
+                   if (OverLoad.iQueueSize == 0)
+                       RX_FULL = 0;
+               }
+#endif
            }
         }
 END_INPUT_COM:;
                //bitclr(PORTA,2);
+
    }
+#endif // 
 #ifdef __PIC24H__
+
     /////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////
 // UART errors
@@ -932,6 +1238,7 @@ END_INPUT_COM:;
    }
 #endif
 
+#ifndef NOT_USE_COM1
    ////////////////////////////////////////////////////////////////////////////////////////////
    ///////////////////////////////////////////////////////////////////////////////////////////
    IF_TXIE //if (TXIE) // expecting interrupts
@@ -939,110 +1246,82 @@ END_INPUT_COM:;
 #ifdef __PIC24H__
        unsigned int work1;
        TXIF = 0;             // for pic24 needs to clean interrupt flag inside software
-       if (!U1STAbits.UTXBF) // is any space in HW output queue ? (if bit == 0 then it is posible to push another byte)
+       while(!U1STAbits.UTXBF) // is any space in HW output queue ? (if bit == 0 then it is posible to push another byte)
 #else
-       if (TXIF)        
+       while (TXIF) 
 #endif
        {
-#ifdef SPEED_SEND_DATA
-           if (Speed.SpeedSendLocked)
-               goto SPEED_SEND;
+#ifdef TX_NOT_READY
+           if (TX_NOT_READY)  // next unit is not ready to acsept data 
+                goto CLOSE_SEND;
 #endif
-           if (AOutQu.iQueueSize)
+
+#ifdef __PIC24H__
+#else
+           Main.SendComOneByte = _TRMT;
+#endif
+           if (OverLoad.iQueueSize)
            {
-               //if (!BlockComm) // com and I2C shared same output queue - in case of I2C nothing goes to com
-               {
-                   // load to TXREG will clean TXIF
-                   TXREG = AOutQu.Queue[AOutQu.iExit];
-                   if (++AOutQu.iExit >= OUT_BUFFER_LEN)
-                       AOutQu.iExit = 0;
-                   AOutQu.iQueueSize--;
-               }
+               // load to TXREG will clean TXIF (on some PIC)
+               TXREG = OverLoad.Queue[OverLoad.iExit];
+               if (++OverLoad.iExit >= OVER_BUFFER_LEN)
+                   OverLoad.iExit = 0;
+               OverLoad.iQueueSize--;
            }
            else
            {
+                if (Main.RelayPktOverload)
+                    RX_FULL = 0;  // all overloaded data from direct replay can send to output - now previous unit can send data 
+                Main.RelayPktOverload = 0;
+                
+         		if (AOutQu.iQueueSize)
+           		{
+               		// load to TXREG will clean TXIF (on some PIC)
+               		TXREG = AOutQu.Queue[AOutQu.iExit];
+               		if (++AOutQu.iExit >= OUT_BUFFER_LEN)
+                   		AOutQu.iExit = 0;
+               		AOutQu.iQueueSize--;
+           		}
+           		else
+           		{
 SPEED_SEND:
-#ifdef SPEED_SEND_DATA
-               if (Speed.SpeedSend)
-               {
-                   Speed.SpeedSendLocked = 1;
-                   if (Speed.SpeedSendUnit)
-                   {
-                       TXREG = UnitFrom;
-DONE_WITH_SPEED:
-                       Speed.SpeedSend =0;
-                       Speed.SpeedSendLocked = 0;
-                       goto CONTINUE_WITH_ISR;        
-                   }
-                   if (Speed.SpeedSendWithESC)
-                   {
-                       if (Speed.SpeedESCwas)
-                       {
-                           Speed.SpeedESCwas = 0;
-                           goto SPEED_TX;
-                       }
-                       work1 = ptrSpeed[LenSpeed];
-                       if (work1 == ESC_SYMB)
-                       {
-                           // escape it
-ESCAPE_IT:                 TXREG = ESC_SYMB;
-                           Speed.SpeedESCwas = 1;
-                           goto CONTINUE_WITH_ISR;        
-                       }
-                       if (work1 < MIN_ADR)
-                           goto SPEED_TX;
-                       if (work1 > MAX_ADR)
-                           goto SPEED_TX;
-                       goto ESCAPE_IT;
-                   }
-SPEED_TX:
-                   TXREG = ptrSpeed[LenSpeed];
-                   if ((--LenSpeed) == 0)
-                   {
-                        if (UnitFrom)
-                           Speed.SpeedSendUnit = 1;
-						else                        
-                           goto DONE_WITH_SPEED;
-                   }
-                   goto CONTINUE_WITH_ISR; 
-              }
-#endif
-
-               if (_TRMT)    // if nothing ina queue and transmit done - then disable interrupt for transmit
-               {             // otherwise it will be endless
-                    // for speed up output - first bytes already send + at the end needs to send UnitAddr
-                   TXIE = 0;
-               }
-               else // transmit buffer has something in it (also for pic24 in a bufer there is a data)
-               {
-#ifdef SPEED_SEND_DATA
-                  if (!Speed.SpeedSend) // nothing in a output queue and speed send is done then needs to disable interrupt to
-#endif
-                      TXIE = 0;         // avoid reentry of interrupt
-                  //I2C.SendComOneByte = 0;
-               }
+CLOSE_SEND:
+               		// if nothing ina queue and transmit done - then disable interrupt for transmit
+               		// otherwise it will be endless
+               		// for speed up output - first bytes already send + at the end needs to send UnitAddr
+               		TXIE = 0;
+                    break;
+               		// transmit buffer has something in it (also for pic24 in a bufer there is a data)
+               		// avoid reentry of interrupt
+           		}
            }
+           if (!Main.SendComOneByte) 
+               break;
        }
 CONTINUE_WITH_ISR:;
+
    }
+#endif // #ifndef NOT_USE_COM1
     /////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////
+	// TIMER ZERO Handler (Type A) - logical from zero based number
     IF_TIMER0_INT_FLG //if (TIMER0_INT_FLG) // can be transfer byte using TMR0
     {
         TIMER0_INT_FLG = 0; // clean timer0 interrupt
         //bitset(TIMER0_CONTROL_REG,5);
 #ifndef __PIC24H__
         T0SE = 1;
-   #ifdef _18F2321_18F25K20
+    #ifdef _18F2321_18F25K20
        TMR0ON = 0;
-   #endif
+    #endif
         I2C.Timer0Fired = 1;
         TIMER0_INT_ENBL = 0; // diasable timer0 interrupt
 #else  // for __PIC24H__
+
    #ifdef TEMP_MEASURE
-#ifdef _16F88
+    #ifdef _16F88
 DELAY_1MKS:
-#endif
+    #endif
        if (TEMP_Index > 0) // case when needs to send sequence with a time to TEMP sensor
        {
 BEGIN_TERM_OP:           
@@ -1057,9 +1336,9 @@ BEGIN_TERM_OP:
                else
                {
 #define VISUAL_TEMP 1
-#ifdef VISUAL_TEMP
+    #ifdef VISUAL_TEMP
                    TEMP_MEASURE = 1;
-#endif
+    #endif
                    TIMER0_BYTE = (TEMP_MASTER_RST_WAIT-5); TEMP_I_O = 1;  TEMP_Index--;  // 30 mks (measure==64)
                } 
                TEMP_Status++; // 0->1 1 ->2
@@ -1400,164 +1679,28 @@ TMR0_DONE:
    #endif
        {
 TMR0_DONE:
+#ifdef QUAD_CTLR //src code for quad control
+          if (Timer0Counter ==0)
+          {
+              TMR0ON = 0;
+              TIMER0_INT_ENBL = 0; // diasable timer0 interrupt
+          }
+          else
+          {
+              Timer0Counter--;
+          }
+#else // non QUAD code
           TMR0ON = 0;
-          I2C.Timer0Fired = 1;
           TIMER0_INT_ENBL = 0; // diasable timer0 interrupt
+#endif
+          I2C.Timer0Fired = 1;
+          
        }
 #endif
     }
 //    else 
 //NextCheckBit:
 
-    /////////////////////////////////////////////////////////////////////////////////////////////
-    /////////////////////////////////////////////////////////////////////////////////////////////
-    IF_TMR1IF //if (TMR1IF)  // update clock
-    {
-        TMR1IF = 0;
-        //TmrAllConter++; 
-#ifdef BT_TIMER1
-        if (DataB0.Timer1Meausre)
-        {
-            Tmr1High++; // timer count and interrupts continue
-        }
-        else if (DataB0.Timer1Count)
-        {
-            if ((++Tmr1TOHigh) == 0)
-            {
-                if (DataB0.Timer1DoTX) // was a request to TX data on that frquency
-                {
-                    PORT_AMPL.BT_TX = 1;
-                    bitset(PORT_BT,Tx_CE);
-                    //DataB0.Timer1Count = 0; // switch off req round robin
-                    //DataB0.Timer1Meausre = 1; // and set timer measure
-                    //TMR1 = 0;
-                    //Tmr1High = 0;
-                    //goto SWITCH_FQ;
-                    DataB0.Timer1DoTX = 0;
-                }
-                //else
-                //{
-                    //TIMER1 = Tmr1LoadLow;  
-                    TMR1H = (unsigned char)(Tmr1LoadLow>>8);
-                    TMR1L = (unsigned char)(Tmr1LoadLow&0xff);
-                    //DataB0.Timer1Inturrupt = 1; // and relaod timer
-                    Tmr1TOHigh = Tmr1LoadHigh;
-//#define SHOW_RX
-                    if (++FqTXCount>=3)
-                    {
-                       FqTXCount = 0;
-                       FqTX = Freq1;
-#ifdef SHOW_RX_TX
-   #ifdef SHOW_RX
-   #else
-                       DEBUG_LED_ON;
-   #endif
-#endif
-
-                    }
-                    else
-                    {
-#ifdef SHOW_RX_TX
-   #ifdef SHOW_RX
-   #else
-                      DEBUG_LED_OFF;
-   #endif
-#endif
-
-                        if (FqTXCount == 1)
-                            FqTX = Freq2;
-                        else
-                            FqTX = Freq3;
-                    }
-                //}
-            }
-        }
-        
-#else // BT timer1
-        if (++TMR130 == TIMER1_ADJ0)
-        {
-#ifdef __PIC24H__
-            TMR2 += TIMER1_ADJUST;//46272; // needs to be adjusted !!!
-            if (TMR2 < TIMER1_ADJUST)//46272)
-                goto TMR2_COUNT_DONE;
-#else
-
-RE_READ_TMR1:
-            work2 = TMR1H;
-            work1 = TMR1L;
-//          point of time
-            if (work2 != TMR1H)    // 4 tick
-                goto RE_READ_TMR1;// 
-            if (work1 > 149)        // 4 tick
-            {
-                work1 += 0x6b;        
-                work2 += 0x7b;        
-                nop();
-                nop();              // 8 tick
-            }
-            else
-            {
-                work1 += 0x6b;    
-                work2 += 0x8f;    // 8 tick
-                
-            }
-            TMR1L = 0;            // 1 tick
-            TMR1H = work2;        // 2 tick
-            TMR1L = work1;        // 2 tick
-            // error will be in 1/30 TMR30 counter
-            // needs to make sure from 0-29 is 1130 ticks plus on each TMR130 value
-            //   on TMR130 == 30 it is adjust to next sec proper set
-#endif
-        }
-        else if (TMR130 >TIMER1_ADJ0)
-        {
-            //RtccReadTimeDate(&RtccTimeDateVal);
-TMR2_COUNT_DONE:
-            TMR130 = 0;
-            if (++TMR1SEC > 59)
-            {
-                TMR1SEC=0;
-                if (++TMR1MIN > 59)
-                {
-                    TMR1MIN = 0;
-                    //RTTCCounts = 0;
-                    if (++TMR1HOUR > 23)
-                    {
-                         TMR1HOUR = 0;
-                         if (TMR1YEAR & 0x3) // regilar year
-                         {
-                             if (++TMR1DAY > 365)
-                             {
-                                 TMR1DAY = 0;
-                                 TMR1YEAR++;
-                             }
-                         }
-                         else // leap year
-                         {
-                             if (++TMR1DAY > 366)
-                             {
-                                 TMR1DAY = 0;
-                                 TMR1YEAR++;
-                             } 
-                         }
-#ifdef USE_LCD
-                         sprintf(&LCDDD[0],"%02d",TMR1DAY);
-#endif
-                    }
-#ifdef USE_LCD
-                    sprintf(&LCDHH[0],"%02d",TMR1HOUR);
-#endif
-                }
-#ifdef USE_LCD
-                sprintf(&LCDMM[0],"%02d",TMR1MIN);
-#endif
-            }
-#ifdef USE_LCD
-            sprintf(&LCDSS[0],"%02d",TMR1SEC);
-#endif
-        }
-#endif
-    }
 
 #ifdef RTCC_INT
    ///////////////////////////////////////////////////////////////////////////////////////////////
@@ -1582,83 +1725,6 @@ TMR2_COUNT_DONE:
    }
 #endif   
 
-#ifdef BT_TIMER3
-    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    IF_TMR3IF // RX timer
-    {
-        TMR3IF = 0;
-        
-
-        if (DataB0.Timer3Meausre)
-        {
-            Tmr3High++; // timer count and interrupts continue
-        }
-        else if (DataB0.Timer3Count)
-        {
-            if ((++Tmr3TOHigh) == 0)
-            {
-                //TIMER3 = Tmr3LoadLow;  
-                TMR3H = (unsigned char)(Tmr3LoadLow>>8);
-                TMR3L = (unsigned char)(Tmr3LoadLow&0xff);
-                Tmr3TOHigh = Tmr3LoadHigh;
-                Tmr3LoadLow = Tmr3LoadLowCopy;
-                if (SkipPtr)
-                {
-                   SkipPtr--;
-                }
-                else
-                {
-                    DataB0.Timer3Inturrupt = 1;
-                    if (++FqRXCount>=3)
-                    {
-                        FqRXCount = 0;
-                        FqRX = Freq1;
-                        if (OutSyncCounter)
-                        {
-                             // this will produce request to switch off Round-Robin to one FQ listening
-                            if (DataB0.AlowSwitchFq1ToFq3)
-                               if (--OutSyncCounter == 0)
-                               {
-                                  DataB0.Timer3OutSyncRQ = 1;
-                               }
-                        }
-#ifdef DEBUG_LED
-                       DEBUG_LED_OFF;
-   #ifdef DEBUG_LED_CALL_LUNA
-                        if (ATCMD & MODE_CONNECT)
-                        {
-                            if (ESCCount == 0)
-                            {
-                                if (!BTFlags.BTNeedsTX)
-                                {
-                                    if (AInQu.iQueueSize == 0)
-                                    {
-                                        AInQu.Queue[AInQu.iEntry] = '?';
-                                        if (++AInQu.iEntry >= BUFFER_LEN)
-                                            AInQu.iEntry = 0;
-                                        AInQu.iQueueSize++;
-                                    }
-                                }
-                            }
-                        }
-   #endif
-#endif
-
-                    }
-                    else
-                    {
-                        if (FqRXCount == 1)
-                           FqRX = Freq2;
-                        else
-                           FqRX = Freq3;
-                    }
-                }
-            }
-        }
-        
-    }
-#endif
 
 #ifdef EXT_INT
     /////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1672,70 +1738,234 @@ TMR2_COUNT_DONE:
             //Main.ExtFirst =1;
             
 #ifdef BT_TX
+// SYNC_DEBUG 0: uncomment next line to measure exact TX time for one packet 
+//#define MEASURE_EXACT_TX_TIME 1
+// for debug to get real value on int0 - but using value is in TransmittBT function
+#ifdef MEASURE_EXACT_TX_TIME
+            // in debug mode only!!!
+            if (DataB0.Timer1Meausre)  // TX measure
+            {
+                Tmr1LoadHigh = 0xffff - Tmr1High; // this will
+                Tmr1LoadLow = 0xffff - TIMER1;      // timer1 interupt reload values 
+                DataB0.Timer1Meausre = 1;
+                Timer1HCount = 0;
+                Timer3HCount = 0;
+                TimerHHCount = 0; 
+            }
+#endif
             // communication BT - on interrupt needs goto standby state
             // may be for RX it is owerkill but for TX it is definetly == in TX it should not stay longer
             // TBD: also may be need to switch off transmitter or receiver
             //BTCE_low();  // Chip Enable Activates RX or TX mode (now disable)
-            
-#ifdef BT_TIMER3
-            if (BTType & 0x01) // it was RX operation
+            if (BTType == 1) // it was RX operation
             {
-                if (DataB0.Timer3SwitchRX)
-                    bitclr(PORT_BT,Tx_CE);	// Chip Enable Activates RX or TX mode (now standby)
+                //bitclr(PORT_BT,Tx_CE);	// Chip Enable (Activates RX or TX mode) == now standby
+                DataB0.RXPktIsBad = 0;
+                DataB0.RXPkt2IsBad = 0;
+                IntRXCount =  FqRXCount;
+                if (DataB0.Tmr3DoneMeasureFq1Fq2) // receive set
+                {    
+                    AdjustTimer3 = INTTimer3;//TIMER3;
 
-                if (DataB0.Timer3DoneMeasure) // receive set
-                {
-                    SkipPtr++; // set of next frquency will be in CallBackMain
-                    AdjustTimer3 = TIMER3;
-                    DataB0.Timer3Ready2Sync = 1;
+                    // case: in TMR3 it was 4 sec without RX == uncyncronization
+                    // just need to start TMR3 and check: Is this packet OK?
+                    if (DataB0.Timer3OutSyncRQ)
+                    {
+                        if (INTTimer3 < 0xff00)
+                        {
+                            AdjustTimer3 = TIMER3 - INTTimer3;
+                            TMR3H = (AdjustTimer3>>8);
+                            TMR3L = (unsigned char)(AdjustTimer3&0xFF);
+                        }
+                        else  // case when TMR3 is over 0xffff
+                        {    
+                            TMR3H = 0;
+                            TMR3L = 0;
+                        }
+                        if (FqRXCount == 0)
+                        {
+                            PossibleRXTmr1 = INTTimer1;
+                            PossibleRXTmr1H = INTTimer1HCount;     
+                        }
+                        goto NOTHING_CAN_BE_DONE;
+                    }
+                    DataB0.Timer3Ready2Sync = 0;
+                    Time1Left = AdjustTimer3;
+                    if (Time1Left > 0x8000)
+                        Time1Left = 0xffff - Time1Left; 
+                    if ( Time1Left > MEDIAN_TIME_LOW)
+                    {
+                         if ( Time1Left < MEDIAN_TIME_HIGH)
+                         {
+                             // pkt is in time frame to get it
+                             SkipRXTmr3 = 1; // timeout in timer3 (RX) will be blocked
+                             if (FqRXCount == 0)
+                             {
+                                 PossibleRXTmr1 = INTTimer1;
+                                 PossibleRXTmr1H = INTTimer1HCount;
+                                 
+                             }
+                             // SYNC_DEBUG 8:  skip adjust the TMR3
+                             if (DataB0.IntitialTmr3OffsetDone)  // set 1  -> set 0 on Tmr3 measure and set 1 again on next interrupr all done to skip AdjustTimer3 on first (FQ2) RX  
+                                 DataB0.Timer3Ready2Sync = 1;
+                             else 
+                                 DataB0.IntitialTmr3OffsetDone = 1;
+                         }
+                         else 
+                             goto IGNORE_BAD_PKT;
+                    }
+                    else // RX INT is error can be ignored
+                    {
+IGNORE_BAD_PKT:         DataB0.RXPktIsBad = 1;
+                    }
+                    
+                     
+                    
                 }
                 else // needs to monitor FQ1 and FQ2 receive time
                 {
-                    if (RXreceiveFQ == 0) // it is receive over Fq1 == need to start timer to record time btw Fq1 and FQ2
+                    if (FqRXCount == 0) // it is receive over Fq1 == need to start timer3 to record time btw Fq1 and FQ2
                     {
-                        DataB0.Timer3Meausre = 1;
-                        TMR3H = 0;
-                        TMR3L = 0;
+                        DataB0.Tmr3DoMeausreFq1_Fq2 = 1;
+                        DataB0.Tmr3Run = 0;
                         TMR3IF = 0;
                         TMR3IE = 1;
                         Tmr3High  = 0;
-                        T3CON = 0b10000001;
+                        //T3CON = 0b10000001;  // start timer3 (RX)
+                        Tmr3LoadLow =TIMER3 -INTTimer3;
+                        TMR3H = (Tmr3LoadLow>>8);
+                        TMR3L = (unsigned char)(Tmr3LoadLow&0xFF);
+                        DataB0.IntitialTmr3OffsetDone = 1;  // set 1  -> set 0 on Tmr3 measure and set 1 again on next interrupr all done to skip AdjustTimer3 on first (FQ2) RX 
                     }
-                    else if (RXreceiveFQ == 1) // it was receive over Fq2
+                    else if (FqRXCount == 1) // it was receive over Fq2
                     {
-                        if (DataB0.Timer3Meausre) // timer for a measure was started ??
+                        if (DataB0.Tmr3DoMeausreFq1_Fq2) // timer for a measure was started ??
                         {
-                            TMR3ON = 0;
-                            Tmr3LoadLowCopy =0xFFFF - TIMER3;      // timer1 interupt reload values 
-                            Tmr3LoadLowCopy += 52;
-                            Tmr3LoadLow = Tmr3LoadLowCopy - MEDIAN_TIME;
-                            TMR3H = (Tmr3LoadLow>>8);
-                            TMR3L = (unsigned char)(Tmr3LoadLow&0xFF);
-                            //TMR3L = 0;//xff;
-                            TMR3ON = 1; // continue run
-                            Tmr3TOHigh = Tmr3LoadHigh = 0xffff - Tmr3High;
-                            DataB0.Timer3Meausre = 0;
-                            DataB0.Timer3Count = 1;
-                            DataB0.Timer3Inturrupt = 0;
-                            //SkipPtr =1;
-                            DataB0.Timer3OutSync = 0;
+                            if (DataB0.RXMessageWasOK) // that can be only: RX FQ1 was OK ; RX INT on FQ2
+                            {
+                                //TMR3ON = 0;                            // stop timer3 for a moment 
+                                Tmr3LoadLowCopy =0xFFFF - INTTimer3;//TIMER3;      // timer3 interupt reload values 
+                                //Tmr3LoadLowCopy +=3;                 // ofset from begining of a interrupt routine
+                                //Tmr3LoadLowCopy -=0x36 ;
+                                // offset from ISR to set nex timer is 0x36 cycles
+                                
+                                 //////////////it is essential in ther cese of slow processor
+                                //if (Tmr3LoadLow <= MEDIAN_TIME)
+                                //    Tmr3High++;
+                                Tmr3LoadLow = Tmr3LoadLowCopy - MEDIAN_TIME;
+                                TMR3H = (Tmr3LoadLow>>8);
+                                TMR3L = (unsigned char)(Tmr3LoadLow&0xFF);
+                                //TMR3ON = 1; // continue run TMR3
+                                Tmr3LoadLowCopy += 3;// difference (btw start and stop timer) in ofset from begining of a interrupt routine 
+                                // SYNC_DEBUG 1 set the same value and in TransmitBTdata to have perfect sync
+                                // SYNC_DEBUG 2 set different value in both to have out of sync case
+                                //Tmr3LoadLowCopy = 0x977b;//0x97ed;
+                                Tmr3LoadLow = Tmr3LoadLowCopy;//+0x30;//0x36;
+                                
+                                
+                                //TMR3L = 0;//xff;
+                                Tmr3TOHigh = Tmr3LoadHigh = 0xffff - Tmr3High;
+                                DataB0.Tmr3DoMeausreFq1_Fq2 = 0;           // switch in timer3 interrupt routine from "measure time FQ1-FQ2"
+                                DataB0.Tmr3Run = 1;               // to "run timer3 on BT RX"
+                                DataB0.Tmr3Inturrupt = 0;         // when "measured time FQ1-FQ2" passed it will be timer3 interrupt
+                                AdjRX = 0;
+                                iAdjRX = 0x7f;
+                                // that is real frquency number (0,1,2)
+                                // FqRXCount can fluctuate
+                                // but FqRXRealCount is solid value
+                                FqRXRealCount = 2;//FqRXCount;
+                                DataB0.IntitialTmr3OffsetDone = 0; // set 1  -> set 0 on Tmr3 measure and set 1 again on next interrupr all done to skip AdjustTimer3 on first (FQ2) RX 
+                            }
+                            else
+                            {
+                                DataB0.Tmr3DoMeausreFq1_Fq2 = 0;
+                                DataB0.RXPkt2IsBad = 1;
+                                DataB0.RXPktIsBad = 1;
+                                DataB0.Tmr3Run = 0;
+                            }    
                         }
                     }
+                    else
+                    {
+                        DataB0.Tmr3DoMeausreFq1_Fq2 = 0;
+                        DataB0.Tmr3Run = 0;
+                    }
                 }
-                if (!DataB0.Timer3OutSync)
-                    OutSyncCounter = 125; // 2.5 sec no packets == switch for out of sync
+NOTHING_CAN_BE_DONE: ;
             }
-            else
-                bitclr(PORT_BT,Tx_CE);	// Chip Enable Activates RX or TX mode (now standby)
+            else // TX operation
+            {
+                bitclr(PORT_BT,Tx_CE);	// Chip Enable (RX or TX mode) == now standby
+#ifdef DEBUG_SIM
+                PORT_AMPL.BT_TX = 0;
 #endif
-
+                if (FqTXCount == 1) // TX just finished on FQ1
+                {
+                    DistMeasure.TXbTmr1H = DistMeasure.TXaTmr1H;
+                    DistMeasure.TXbTmr1 = DistMeasure.TXaTmr1;
+                    DistMeasure.TXaTmr1H = INTTimer1HCount;
+                    DistMeasure.TXaTmr1 = INTTimer1;
+                }
+            }
 #endif
         }
     }
  #ifdef _18F2321_18F25K20 
  //#define USE_INT1 1
+   #ifdef BT_TX
+   IF_TMR2IF
+   {
+       TMR2Count ++;
+       TMR2IF = 0;
+   }
+   #endif
  #endif
+
+
  #ifdef __PIC24H__
+
+    #ifdef USE_ADC_WITH_DMA
+    IF_ADC_DMA
+    {
+        IFS0bits.DMA0IF = 0;
+        AD1CON1bits.ADON = 0; //STOP analog to digital conversion
+    }
+    #endif // end of USE_ADC_WITH_DMA
+
+    #ifdef USE_ADC_WITHOUT_DMA
+    IF_ADCDONE //analog to digital conversion completed interrupt
+    {
+        IFS0bits.AD1IF = 0; 
+        if(QUAD_3_STATe==0)
+        {
+            ADCresultsB[0] = ADC1BUF0; 
+            QUAD_3_STATe = 1;
+            QUAD_3       = 0;
+        }
+        else if(QUAD_3_STATe==1)
+        {
+            QUAD_3_STATe = 2;
+            ADCresultsB[1] = ADC1BUF0; 
+            QUAD_3       = 0;
+            //AD1CON1bits.ADON = 0; //STOP analog to digital conversion
+        }
+        else if(QUAD_3_STATe==2)
+        {
+            QUAD_3_STATe = 3;
+            ADCresultsB[3] = ADC1BUF0; 
+            QUAD_3       = 0;
+            //AD1CON1bits.ADON = 0; //STOP analog to digital conversion
+        }
+        else if(QUAD_3_STATe==3)
+        {
+            QUAD_3_STATe = 0;
+            ADCresultsB[4] = ADC1BUF0; 
+            QUAD_3       = 1;
+            AD1CON1bits.ADON = 0; //STOP analog to digital conversion
+        }
+        //IEC0bits.AD1IE = 1;
+    }
+    #endif // USE_ADC_WITHOUT_DMA
  #define USE_INT1 1
  #endif
  #ifdef USE_INT1
@@ -1791,40 +2021,14 @@ MAIN_EXIT:
 //#define ONEBIT_TMR0_LEN 0x10
 // temp vars will be on bank 1 together with I2C queue
 #pragma rambank RAM_BANK_1
+#ifdef SSPORT
+void SendSSByte(unsigned char bByte);
+unsigned char GetSSByte(void);
+void SendSSByteFAST(unsigned char bByte); // for a values <= 3
+#endif
+
+
 ////////////////////////////////////BANK 1////////////////////////////////////
-#ifdef NEW_CMD_PROC
-#else
-unsigned char Monitor(unsigned char bWork, unsigned char CheckUnit)
-{
-    if (Main.prepESC)
-    {
-        Main.prepZeroLen = 0;
-        Main.prepESC = 0;
-    }
-    else if (bWork == ESC_SYMB) // it is ESC char ??
-    {
-        Main.prepESC = 1;
-        Main.prepZeroLen = 0;
-    }
-    else if (bWork == CheckUnit) // 
-    {
-        if (Main.prepZeroLen) // packets with zero length does not exsists
-            return 0;   
-        Main.prepCmd = 0;
-        Main.prepStream = 1;
-#ifdef ALLOW_RELAY_TO_NEW
-        AllowMask = AllowOldMask;AllowOldMask= AllowOldMask1;AllowOldMask1= AllowOldMask2;AllowOldMask2= AllowOldMask3;AllowOldMask3= AllowOldMask4; // restore allow mask
-        AllowOldMask4 = 0xff;
-#else
-        AllowMask = 0xff;
-#endif
-        return 1;
-    }
-    else
-        Main.prepZeroLen = 0;
-    return 0;
-}
-#endif
 //////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////

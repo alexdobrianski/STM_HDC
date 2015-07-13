@@ -4,6 +4,7 @@
 // begin COPY 6
 ///////////////////////////////////////////////////////////////////////   
 
+#ifndef NOT_USE_COM1
         AInQu.iEntry = 0;
         AInQu.iExit = 0;
 		AInQu.iQueueSize = 0;
@@ -11,6 +12,7 @@
 		AOutQu.iEntry = 0;
         AOutQu.iExit = 0;
 		AOutQu.iQueueSize = 0;
+#endif
 #ifndef NO_I2C_PROC
         AInI2CQu.iEntry = 0;
         AInI2CQu.iExit = 0;
@@ -28,37 +30,42 @@
 #endif
 
         //Main = 0;
+        Main.PktAsCMD = 0;
         Main.getCMD = 0;
         Main.ESCNextByte = 0;
-        Main.CMDProcess = 0;
-        Main.CMDProcessCheckESC = 0;
+        Main.OutPacket = 0;
+        Main.OutPacketESC = 0;
+        Main.OutPacketLenNull = 0;
 
+        Main.GetPkt = 0;
+        Main.GetPktESC = 0;
+        Main.GetPktLenNull = 0;
+        Main.RelayPktLenNull = 0;
+        Main.RelayGranted = 0;
+        Main.RelayPktOverload = 0;
+        Main.RelayPktESC = 0;
         Main.PrepI2C = 0;
         Main.DoneWithCMD = 1;
 
-        Main.prepStream = 1;
-        Main.prepCmd = 0;
-        Main.prepESC = 0;
-        Main.prepZeroLen = 0;
-
-        Main.SomePacket = 0;
-        Main.OutPacket = 0;
+        //Main.OutPacket = 0;
         Main.OutPacketESC = 0;
-        Main.OutPacketZeroLen = 0;
         Main.LockToQueue = 0;
 
         Main.RetransmitTo = 0;
 #ifdef NON_STANDART_MODEM
         Main.SendOverLink = 0;
+        Main.SendOverLinkAndProc = 0;
+        Main.SendOverLinkStarted = 0;
+        Main.FlashRQ = 0;
+        Main.PingRQ = 0;
+        Main.PingRSPRQ = 0;
+        Main.DoPing= 0;
+        Main.ConstantPing=0;
 #endif
         //Main.SendWithEsc = 0;
         //Main.CommLoopOK = 0;
         Main.LastWasUnitAddr = 0;
-
-
-#ifdef USE_OLD_CMD_EQ
-        RetransmitLen = 0;
-#endif
+        PingAttempts = 0;
 
         SSPADD = UnitADR<<1;
         I2C.LockToI2C = 0;
@@ -70,14 +77,6 @@
         //BlockComm = 0;
 
         I2C.Timer0Fired = 0;
-#ifdef SPEED_SEND_DATA
-        Speed.SpeedSend = 0;
-        Speed.SpeedSendLocked = 0;
-        Speed.SpeedSendUnit = 0;
-        Speed.SpeedSendWithESC = 0;
-        Speed.SpeedESCwas = 0;
-
-#endif
 #ifdef I2C_INT_SUPPORT
 		I2C_B1.NeedMaster = 0;
         I2C_B1.NeedRestart = 0;
@@ -88,15 +87,14 @@
 
 
 #endif
+
         I2C_B1.I2CMasterDone = 1;
-        RetrUnit = 0;
+        RelayPkt = 0;
+        OutPacketUnit = 0;
         AllowMask = 0xff;
-#ifdef ALLOW_RELAY_TO_NEW
-        AllowOldMask1 = 0xff;AllowOldMask2=0xff;AllowOldMask3=0xff;AllowOldMask4=0xff; AllowOldMask =  0xff;
-#endif
         UnitMask1 = 0xff;
         UnitMask2 = 0;
-        UnitFrom = 0;
+        UnitFrom = '9'; // default unit = 9 TBD on gr stn it is ok but for cube/picosat it must be main comp
 #ifdef SYNC_CLOCK_TIMER
 #ifdef __PIC24H__
         FSR_REGISTER = &Ttilad;
@@ -107,7 +105,9 @@
 #else  // not __PIC24H__
 #endif // __PIC24H__
 #endif // SYNC_CLOCK_TIMER
-
+#ifdef SSPORT
+        DataB3.FlashWas1byteWrite = 0;
+#endif
 ///////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////
